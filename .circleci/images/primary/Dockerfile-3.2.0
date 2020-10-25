@@ -1,6 +1,6 @@
 # Note: See the "Publishing updates to images" note in ./README.md for how to publish new builds of this container image
 
-FROM ruby:3.0.4-bullseye
+FROM ruby:3.2.0-bullseye
 
 # Make apt non-interactive
 RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90circleci \
@@ -38,31 +38,4 @@ RUN set -ex \
   && mv /tmp/docker/* /usr/bin \
   && rm -rf /tmp/docker /tmp/docker.tgz \
   && which docker \
-  && (docker version || true)
-
-# Install Docker Compose
-RUN COMPOSE_URL="https://github.com/linuxserver/docker-docker-compose/releases/download/1.29.2-ls51/docker-compose-$(dpkg --print-architecture)" \
-  && echo COMPOSE_URL: $COMPOSE_URL \
-  && curl --silent --show-error --location --fail --retry 3 --output /usr/bin/docker-compose $COMPOSE_URL \
-  && chmod +x /usr/bin/docker-compose \
-  && docker-compose version
-
-# Install Dockerize
-RUN DOCKERIZE_URL="https://github.com/powerman/dockerize/releases/download/v0.17.0/dockerize-$(uname -s | tr '[:upper:]' '[:lower:]')-$(arch | sed 's/aarch64/arm64/')" \
-  && echo DOCKERIZE_URL: $DOCKERIZE_URL \
-  && curl --silent --show-error --location --fail --retry 3 --output /usr/local/bin/dockerize $DOCKERIZE_URL \
-  && chmod +x /usr/local/bin/dockerize \
-  && dockerize --version
-
-# Install RubyGems
-RUN mkdir -p "$GEM_HOME" && chmod -R 777 "$GEM_HOME"
-
-# Upgrade RubyGems and Bundler
-RUN gem update --system 3.3.26
-RUN gem install bundler -v '~> 2.3.26'
-ENV BUNDLE_SILENCE_ROOT_WARNING 1
-
-RUN mkdir /app
-WORKDIR /app
-
-CMD ["/bin/sh"]
+  && (docker
