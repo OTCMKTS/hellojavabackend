@@ -1,6 +1,53 @@
+
+# Note:
+#
+# There is an incompatibility between ethon and httprb on debian 11 bullseye.
+# This is why this image is based on debian 10 buster.
+#
+# See:
+# - https://github.com/jruby/jruby/issues/7033
+# - https://github.com/DataDog/dd-trace-rb/pull/2380#issuecomment-1320994823
+
 # Note: See the "Publishing updates to images" note in ./README.md for how to publish new builds of this container image
 
-FROM ruby:3.2.0-bullseye
+# openjdk:8-jre image is from https://github.com/docker-library/openjdk/blob/a0c4da867ddd1a11408b7ec5032f12130bdc5476/8/jre/buster/Dockerfile
+# note: docker-library/openjdk is deprecated, there is a later move to https://hub.docker.com/_/eclipse-temurin
+FROM openjdk:8-jre-buster AS jruby-9.2.21.0-jre8
+
+RUN apt-get update && apt-get install -y libc6-dev --no-install-recommends && rm -rf /var/lib/apt/lists/*
+
+ENV JRUBY_VERSION 9.2.21.0
+ENV JRUBY_SHA256 dbf05fca4f61bd7d5131d9b83c5f4d1a249213c474b82def37e82013969c8b8a
+RUN mkdir /opt/jruby \
+  && curl -fSL https://repo1.maven.org/maven2/org/jruby/jruby-dist/${JRUBY_VERSION}/jruby-dist-${JRUBY_VERSION}-bin.tar.gz -o /tmp/jruby.tar.gz \
+  && echo "$JRUBY_SHA256 /tmp/jruby.tar.gz" | sha256sum -c - \
+  && tar -zx --strip-components=1 -f /tmp/jruby.tar.gz -C /opt/jruby \
+  && rm /tmp/jruby.tar.gz \
+  && update-alternatives --install /usr/local/bin/ruby ruby /opt/jruby/bin/jruby 1
+ENV PATH /opt/jruby/bin:$PATH
+
+# skip installing gem documentation
+RUN mkdir -p /opt/jruby/etc \
+  && { \
+    echo 'install: --no-document'; \
+    echo 'update: --no-document'; \
+  } >> /opt/jruby/etc/gemrc
+
+RUN gem install rake net-telnet xmlrpc
+
+# install things globally, for great justice
+# and don't create ".bundle" in all our apps
+ENV GEM_HOME /usr/local/bundle
+ENV BUNDLE_BIN="$GEM_HOME/bin" \
+    BUNDLE_SILENCE_ROOT_WARNING=1 \
+    BUNDLE_APP_CONFIG="$GEM_HOME"
+ENV PATH $BUNDLE_BIN:$PATH
+RUN mkdir -p "$GEM_HOME" "$BUNDLE_BIN" \
+  && chmod 777 "$GEM_HOME" "$BUNDLE_BIN"
+
+CMD [ "irb" ]
+
+FROM jruby-9.2.21.0-jre8
 
 # Make apt non-interactive
 RUN echo 'APT::Get::Assume-Yes "true";' > /etc/apt/apt.conf.d/90circleci \
@@ -16,7 +63,9 @@ RUN set -ex; \
             git mercurial xvfb \
             locales sudo openssh-client ca-certificates tar gzip parallel \
             net-tools netcat unzip zip bzip2 gnupg curl wget \
-            tzdata rsync vim less jq; \
+            tzdata rsync vim less jq \
+            build-essential \
+            shared-mime-info; \
         rm -rf /var/lib/apt/lists/*;
 
 # Set timezone to UTC by default
@@ -61,6 +110,9 @@ RUN mkdir -p "$GEM_HOME" && chmod -R 777 "$GEM_HOME"
 RUN gem update --system 3.3.26
 RUN gem install bundler -v '~> 2.3.26'
 ENV BUNDLE_SILENCE_ROOT_WARNING 1
+
+# Ensure JRuby is available when running "bash --login"
+RUN echo "export PATH=/opt/jruby/bin:$BUNDLE_BIN:\$PATH" >> ~/.profile
 
 RUN mkdir /app
 WORKDIR /app
