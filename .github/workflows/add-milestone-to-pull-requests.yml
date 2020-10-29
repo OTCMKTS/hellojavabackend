@@ -1,0 +1,12 @@
+
+name: Add milestone to pull requests
+on:
+  pull_request_target:
+    types: [closed]
+    branches:
+      - master
+
+jobs:
+  add_milestone_to_merged:
+    if: github.event.pull_request.merged && github.event.pull_request.milestone == null
+    name: Add milestone to merged pull requests
