@@ -57,4 +57,38 @@ jobs:
                 }
 
                 // Add labels to description, to ease categorization
-                var lineI
+                var lineItem = "* "
+                for (let label of pull.labels) {
+                  lineItem += label.name.charAt(0).toUpperCase() + label.name.slice(1) + ": "
+                }
+
+                lineItem += pull.title + " (#" + pull.number + ")"
+
+                // Add author if labeled as 'community'
+                if (pull.labels.some(label => label.name == "community")) {
+                  lineItem += " (@" + pull.user.login + ")"
+                }
+
+                draftText += lineItem + "\n"
+              }
+            }
+            draftText += "\n### Added\n\n### Changed\n\n### Fixed\n\n### Removed\n\n"
+
+            // Escape backticks
+            draftText = draftText.replace(/`/g,"\\`")
+
+            return draftText
+      - name: Create draft release
+        if: fromJSON(steps.milestone.outputs.result)
+        uses: actions/github-script@7a5c598405937d486b0331594b5da2b14db670da # 6.1.0
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: 'v${{ steps.releaseVersion.outputs.result }}',
+              name: '${{ steps.releaseVersion.outputs.result }}',
+              draft: true,
+              body: `${{ steps.generate.outputs.result }}`
+            })
