@@ -1,0 +1,87 @@
+name: System Tests
+
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch: {}
+  schedule:
+    - cron:  '00 04 * * 2-6'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  system-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - library: ruby
+            weblog-variant: rack
+          - library: ruby
+            weblog-variant: sinatra14
+          - library: ruby
+            weblog-variant: sinatra20
+          - library: ruby
+            weblog-variant: sinatra21
+          - library: ruby
+            weblog-variant: rails32
+          - library: ruby
+            weblog-variant: rails40
+          - library: ruby
+            weblog-variant: rails41
+          - library: ruby
+            weblog-variant: rails42
+          - library: ruby
+            weblog-variant: rails50
+          - library: ruby
+            weblog-variant: rails51
+          - library: ruby
+            weblog-variant: rails52
+          - library: ruby
+            weblog-variant: rails60
+          - library: ruby
+            weblog-variant: rails61
+          - library: ruby
+            weblog-variant: rails70
+    runs-on: ubuntu-latest
+    name: System Tests (${{ matrix.weblog-variant }})
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          repository: 'DataDog/system-tests'
+
+      - name: Checkout dd-trace-rb
+        uses: actions/checkout@v3
+        with:
+          path: 'binaries/dd-trace-rb'
+
+      - name: Log in to the Container registry
+        run: |
+          echo ${{ secrets.GITHUB_TOKEN }} | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Build
+        run: ./build.sh --library ${{ matrix.library }} --weblog-variant ${{ matrix.weblog-variant }}
+
+      - name: Run default scenario
+        run: ./run.sh
+        env:
+          DD_API_KEY: ${{ secrets.DD_APPSEC_SYSTEM_TESTS_API_KEY }}
+
+      - name: Run APPSEC_CUSTOM_RULES scenario
+        run: ./run.sh APPSEC_CUSTOM_RULES
+        env:
+          DD_API_KEY: ${{ secrets.DD_APPSEC_SYSTEM_TESTS_API_KEY }}
+
+      - name: Archive logs
+        uses: actions/upload-artifact@v3
+        if: ${{ always() }}
+        with:
+          name: system-tests-${{ matrix.library }}-${{ matrix.weblog-variant }}-logs-${{ github.run_id }}-${{ github.sha }}
+          path: logs*
+
+      - name: Print fancy log report
+        if: ${{ always() }}
+        run: python utils/scripts/markdown_logs.py >> $GITHUB_STEP_SUMMARY

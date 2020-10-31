@@ -1,0 +1,18 @@
+name: Test unstable
+on: [push]
+jobs:
+  test-head:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [head, jruby-head]
+    runs-on: ubuntu-latest
+    env:
+      SKIP_SIMPLECOV: 1
+      JRUBY_OPTS: --dev
+      DD_INSTRUMENTATION_TELEMETRY_ENABLED: false
+    steps:
+      - uses: actions/checkout@v3
+      # bundler appears to match both prerelease and release rubies when we
+      # want the former only. relax the constraint to allow any version for
+      # head rubies
