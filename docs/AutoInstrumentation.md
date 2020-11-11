@@ -42,4 +42,4 @@ a [`Datadog.configure`](GettingStarted.md#integration-instrumentation) call afte
 
 Custom integrations that want to support auto instrumentation need to be registered
 (e.g. invoke their {Datadog::Tracing::Contrib::Registerable::ClassMethods#register_as} method) before
-the tracer requires `'ddtra
+the tracer requires `'ddtrace/auto_instrument'`.
