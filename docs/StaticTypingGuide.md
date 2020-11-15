@@ -108,4 +108,86 @@ To type a `.rb` file without a matching `.rbs` file, start with the skeleton:
 ```
 mkdir -p sig/foo
 bundle exec rbs prototype rb lib/foo/bar.rb > sig/foo/bar.rbs
-`
+```
+
+One can then proceed to [adjusting the signatures](https://github.com/ruby/rbs/blob/e91be7275f4005b1aeac8eadc2faa2b4ad5fdfef/docs/syntax.md) ([by example](https://github.com/ruby/rbs/blob/e91be7275f4005b1aeac8eadc2faa2b4ad5fdfef/docs/rbs_by_example.md)), removing as much `untyped` as possible.
+
+### Type profiling
+
+To discover types, one can leverage [`typeprof`](https://github.com/ruby/typeprof). Contrary to `rbs prototype rb` which relies solely on static parsing, `typeprof` is a Ruby interpreter, except it doesn't *execute* Ruby code, merely evaluates it to track types. Entry point calls to explore the various codepaths are required.
+
+With this file:
+
+```
+# test.rb
+def foo(x)
+  p x        # reveal type of x
+
+  if x > 10
+    x.to_s
+  else
+    nil
+  end
+end
+
+foo(42)      # this call is needed otherwise there's nothing evaluated!
+foo(3)       # make sure to explore as many codepaths as possible to get best coverage
+```
+
+The following is evaluated:
+
+```
+$ typeprof test.rb
+# TypeProf 0.21.2
+
+# Revealed types
+#  foo.rb:3 #=> Integer
+
+# Classes
+class Object
+  private
+  def foo: (Integer x) -> String?
+end
+```
+
+One quick hackish way to type a class is to add a bunch of calls all the way down the file defining that class and run `typeprof` on it exploring the most interesting codepaths. This can also be achieved with a separate file requiring the one we want to type and performing calls there. In theory `typeprof` could be run on unit test files having 100% coverage and output precise type information for the tested code.
+
+See the [demo doc](https://github.com/ruby/typeprof/blob/26ab9108860d9a4ce050acb3422ee7721d4d50b0/doc/demo.md) for more examples and features.
+
+## Useful commands
+
+### Match `.rbs` to `.rb`
+
+```
+find sig -type f -name '*.rbs' | while read -r sig; do tmp="${sig/%.rbs/}"; lib="${tmp/#sig/lib}.rb"; test -f "${lib}" && echo -n 'OK ' || echo -n 'NO '; echo "${lib}"; done
+```
+
+For each `.rbs` file in `sig` it outputs:
+
+- `OK` when a matching `.rb` file is found in `lib`
+- `NO` when no matching `.rb` file is found in `lib`
+
+Therefore with `| grep '^NO'` it becomes easy to list `.rbs` files that have no match, so, given the layout design, these files are stale.
+
+### Match `.rb` to `.rbs`
+
+```
+find lib -name \*.rb -print | while read -r lib; do tmp="${lib/%.rb/}"; sig="${tmp/#lib/sig}.rbs"; test -f "${sig}" && echo -n 'OK ' || echo -n 'NO '; echo "${sig}"; done
+```
+
+Adjust `find` to restrict scope.
+
+For each `.rb` file in `lib` it outputs:
+
+- `OK` when a matching `.rbs` file is found in `sig`
+- `NO` when no matching `.rbs` file is found in `sig`
+
+Therefore with `| grep '^NO'` it becomes easy to list `.rb` files that have no match, so, given the layout design, these files are missing typing information.
+
+### Mass-generate missing `.rbs` skeletons
+
+Warning: you probably want to adjust that `find` to a subset of `lib`, as incomplete typing information may end up forcing you to type more things than you initially wanted to!
+
+```
+find lib -name \*.rb -print | while read -r lib; do tmp="${lib/%.rb/}"; sig="${tmp/#lib/sig}.rbs"; test -f "${sig}" || { echo "${sig}"; mkdir -p "${sig/%.rbs}"; bundle exec rbs prototype rb "${lib}" | grep -v '^ *#' > "${sig}" } done
+```
