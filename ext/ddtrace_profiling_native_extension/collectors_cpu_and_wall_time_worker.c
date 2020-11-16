@@ -683,3 +683,140 @@ static VALUE safely_call(VALUE (*function_to_call_safely)(VALUE), VALUE function
   VALUE exception_handler_function_arg = instance;
   return rb_rescue2(
     function_to_call_safely,
+    function_to_call_safely_arg,
+    handle_sampling_failure,
+    exception_handler_function_arg,
+    rb_eException, // rb_eException is the base class of all Ruby exceptions
+    0 // Required by API to be the last argument
+  );
+}
+
+// This method exists only to enable testing Datadog::Profiling::Collectors::CpuAndWallTimeWorker behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_simulate_handle_sampling_signal(DDTRACE_UNUSED VALUE self) {
+  handle_sampling_signal(0, NULL, NULL);
+  return Qtrue;
+}
+
+// This method exists only to enable testing Datadog::Profiling::Collectors::CpuAndWallTimeWorker behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_simulate_sample_from_postponed_job(DDTRACE_UNUSED VALUE self) {
+  sample_from_postponed_job(NULL);
+  return Qtrue;
+}
+
+// After the Ruby VM forks, this method gets called in the child process to clean up any leftover state from the parent.
+//
+// Assumption: This method gets called BEFORE restarting profiling. Note that profiling-related tracepoints may still
+// be active, so we make sure to disable them before calling into anything else, so that there are no components
+// attempting to trigger samples at the same time as the reset is done.
+//
+// In the future, if we add more other components with tracepoints, we will need to coordinate stopping all such
+// tracepoints before doing the other cleaning steps.
+static VALUE _native_reset_after_fork(DDTRACE_UNUSED VALUE self, VALUE instance) {
+  struct cpu_and_wall_time_worker_state *state;
+  TypedData_Get_Struct(instance, struct cpu_and_wall_time_worker_state, &cpu_and_wall_time_worker_typed_data, state);
+
+  // Disable all tracepoints, so that there are no more attempts to mutate the profile
+  disable_tracepoints(state);
+
+  reset_stats(state);
+
+  // Remove all state from the `Collectors::ThreadState` and connected downstream components
+  rb_funcall(state->thread_context_collector_instance, rb_intern("reset_after_fork"), 0);
+
+  return Qtrue;
+}
+
+static VALUE _native_is_sigprof_blocked_in_current_thread(DDTRACE_UNUSED VALUE self) {
+  return is_sigprof_blocked_in_current_thread();
+}
+
+static VALUE _native_stats(DDTRACE_UNUSED VALUE self, VALUE instance) {
+  struct cpu_and_wall_time_worker_state *state;
+  TypedData_Get_Struct(instance, struct cpu_and_wall_time_worker_state, &cpu_and_wall_time_worker_typed_data, state);
+
+  VALUE pretty_sampling_time_ns_min = state->stats.sampling_time_ns_min == UINT64_MAX ? Qnil : ULL2NUM(state->stats.sampling_time_ns_min);
+  VALUE pretty_sampling_time_ns_max = state->stats.sampling_time_ns_max == 0 ? Qnil : ULL2NUM(state->stats.sampling_time_ns_max);
+  VALUE pretty_sampling_time_ns_total = state->stats.sampling_time_ns_total == 0 ? Qnil : ULL2NUM(state->stats.sampling_time_ns_total);
+  VALUE pretty_sampling_time_ns_avg =
+    state->stats.sampled == 0 ? Qnil : DBL2NUM(((double) state->stats.sampling_time_ns_total) / state->stats.sampled);
+
+  VALUE stats_as_hash = rb_hash_new();
+  VALUE arguments[] = {
+    ID2SYM(rb_intern("trigger_sample_attempts")),                    /* => */ UINT2NUM(state->stats.trigger_sample_attempts),
+    ID2SYM(rb_intern("trigger_simulated_signal_delivery_attempts")), /* => */ UINT2NUM(state->stats.trigger_simulated_signal_delivery_attempts),
+    ID2SYM(rb_intern("simulated_signal_delivery")),                  /* => */ UINT2NUM(state->stats.simulated_signal_delivery),
+    ID2SYM(rb_intern("signal_handler_enqueued_sample")),             /* => */ UINT2NUM(state->stats.signal_handler_enqueued_sample),
+    ID2SYM(rb_intern("signal_handler_wrong_thread")),                /* => */ UINT2NUM(state->stats.signal_handler_wrong_thread),
+    ID2SYM(rb_intern("sampled")),                                    /* => */ UINT2NUM(state->stats.sampled),
+    ID2SYM(rb_intern("sampling_time_ns_min")),                       /* => */ pretty_sampling_time_ns_min,
+    ID2SYM(rb_intern("sampling_time_ns_max")),                       /* => */ pretty_sampling_time_ns_max,
+    ID2SYM(rb_intern("sampling_time_ns_total")),                     /* => */ pretty_sampling_time_ns_total,
+    ID2SYM(rb_intern("sampling_time_ns_avg")),                       /* => */ pretty_sampling_time_ns_avg,
+  };
+  for (long unsigned int i = 0; i < VALUE_COUNT(arguments); i += 2) rb_hash_aset(stats_as_hash, arguments[i], arguments[i+1]);
+  return stats_as_hash;
+}
+
+void *simulate_sampling_signal_delivery(DDTRACE_UNUSED void *_unused) {
+  struct cpu_and_wall_time_worker_state *state = active_sampler_instance_state; // Read from global variable, see "sampler global state safety" note above
+
+  // This can potentially happen if the CpuAndWallTimeWorker was stopped while the IdleSamplingHelper was trying to execute this action
+  if (state == NULL) return NULL;
+
+  state->stats.simulated_signal_delivery++;
+
+  // @ivoanjo: We could instead directly call sample_from_postponed_job, but I chose to go through the signal handler
+  // so that the simulated case is as close to the original one as well (including any metrics increases, etc).
+  handle_sampling_signal(0, NULL, NULL);
+
+  return NULL; // Unused
+}
+
+static void grab_gvl_and_sample(void) { rb_thread_call_with_gvl(simulate_sampling_signal_delivery, NULL); }
+
+static void reset_stats(struct cpu_and_wall_time_worker_state *state) {
+  state->stats = (struct stats) {}; // Resets all stats back to zero
+  state->stats.sampling_time_ns_min = UINT64_MAX; // Since we always take the min between existing and latest sample
+}
+
+static void sleep_for(uint64_t time_ns) {
+  // As a simplification, we currently only support setting .tv_nsec
+  if (time_ns >= SECONDS_AS_NS(1)) {
+    grab_gvl_and_raise(rb_eArgError, "sleep_for can only sleep for less than 1 second, time_ns: %"PRIu64, time_ns);
+  }
+
+  struct timespec time_to_sleep = {.tv_nsec = time_ns};
+
+  while (nanosleep(&time_to_sleep, &time_to_sleep) != 0) {
+    if (errno == EINTR) {
+      // We were interrupted. nanosleep updates "time_to_sleep" to contain only the remaining time, so we just let the
+      // loop keep going.
+    } else {
+      ENFORCE_SUCCESS_NO_GVL(errno);
+    }
+  }
+}
+
+static VALUE _native_allocation_count(DDTRACE_UNUSED VALUE self) {
+  bool is_profiler_running = active_sampler_instance_state != NULL;
+
+  return is_profiler_running ? ULL2NUM(allocation_count) : Qnil;
+}
+
+// Implements memory-related profiling events. This function is called by Ruby via the `object_allocation_tracepoint`
+// when the RUBY_INTERNAL_EVENT_NEWOBJ event is triggered.
+static void on_newobj_event(DDTRACE_UNUSED VALUE tracepoint_data, DDTRACE_UNUSED void *unused) {
+  // Update thread-local allocation count
+  if (RB_UNLIKELY(allocation_count == UINT64_MAX)) {
+    allocation_count = 0;
+  } else {
+    allocation_count++;
+  }
+}
+
+static void disable_tracepoints(struct cpu_and_wall_time_worker_state *state) {
+  rb_tracepoint_disable(state->gc_tracepoint);
+  rb_tracepoint_disable(state->object_allocation_tracepoint);
+}
