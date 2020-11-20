@@ -190,4 +190,116 @@ void sample_thread(
 //
 // For sample_thread(), buffer == record_buffer and extra_frames_in_record_buffer == 0, so it's a no-op.
 // For sample_thread_in_gc(), the buffer is a special buffer that is the same as the record_buffer, but with every
-// pointer shifted forward extra_frames_in_record_buffer elements, so that the caller can actually inject those ext
+// pointer shifted forward extra_frames_in_record_buffer elements, so that the caller can actually inject those extra
+// frames, and this function doesn't have to care about it.
+static void sample_thread_internal(
+  VALUE thread,
+  sampling_buffer* buffer,
+  VALUE recorder_instance,
+  sample_values values,
+  ddog_prof_Slice_Label labels,
+  sampling_buffer *record_buffer,
+  int extra_frames_in_record_buffer
+) {
+  int captured_frames = ddtrace_rb_profile_frames(
+    thread,
+    0 /* stack starting depth */,
+    buffer->max_frames,
+    buffer->stack_buffer,
+    buffer->lines_buffer,
+    buffer->is_ruby_frame
+  );
+
+  if (captured_frames == PLACEHOLDER_STACK_IN_NATIVE_CODE) {
+    record_placeholder_stack_in_native_code(
+      buffer,
+      recorder_instance,
+      values,
+      labels,
+      record_buffer,
+      extra_frames_in_record_buffer
+    );
+    return;
+  }
+
+  // Ruby does not give us path and line number for methods implemented using native code.
+  // The convention in Kernel#caller_locations is to instead use the path and line number of the first Ruby frame
+  // on the stack that is below (e.g. directly or indirectly has called) the native method.
+  // Thus, we keep that frame here to able to replicate that behavior.
+  // (This is why we also iterate the sampling buffers backwards below -- so that it's easier to keep the last_ruby_frame)
+  VALUE last_ruby_frame = Qnil;
+  int last_ruby_line = 0;
+
+  for (int i = captured_frames - 1; i >= 0; i--) {
+    VALUE name, filename;
+    int line;
+
+    if (buffer->is_ruby_frame[i]) {
+      last_ruby_frame = buffer->stack_buffer[i];
+      last_ruby_line = buffer->lines_buffer[i];
+
+      name = rb_profile_frame_base_label(buffer->stack_buffer[i]);
+      filename = rb_profile_frame_path(buffer->stack_buffer[i]);
+      line = buffer->lines_buffer[i];
+    } else {
+      name = ddtrace_rb_profile_frame_method_name(buffer->stack_buffer[i]);
+      filename = NIL_P(last_ruby_frame) ? Qnil : rb_profile_frame_path(last_ruby_frame);
+      line = last_ruby_line;
+    }
+
+    name = NIL_P(name) ? missing_string : name;
+    filename = NIL_P(filename) ? missing_string : filename;
+
+    buffer->lines[i] = (ddog_prof_Line) {
+      .function = (ddog_prof_Function) {
+        .name = char_slice_from_ruby_string(name),
+        .filename = char_slice_from_ruby_string(filename)
+      },
+      .line = line,
+    };
+  }
+
+  // Used below; since we want to stack-allocate this, we must do it here rather than in maybe_add_placeholder_frames_omitted
+  const int frames_omitted_message_size = sizeof(MAX_FRAMES_LIMIT_AS_STRING " frames omitted");
+  char frames_omitted_message[frames_omitted_message_size];
+
+  // If we filled up the buffer, some frames may have been omitted. In that case, we'll add a placeholder frame
+  // with that info.
+  if (captured_frames == (long) buffer->max_frames) {
+    maybe_add_placeholder_frames_omitted(thread, buffer, frames_omitted_message, frames_omitted_message_size);
+  }
+
+  record_sample(
+    recorder_instance,
+    (ddog_prof_Slice_Location) {.ptr = record_buffer->locations, .len = captured_frames + extra_frames_in_record_buffer},
+    values,
+    labels
+  );
+}
+
+static void maybe_add_placeholder_frames_omitted(VALUE thread, sampling_buffer* buffer, char *frames_omitted_message, int frames_omitted_message_size) {
+  ptrdiff_t frames_omitted = stack_depth_for(thread) - buffer->max_frames;
+
+  if (frames_omitted == 0) return; // Perfect fit!
+
+  // The placeholder frame takes over a space, so if 10 frames were left out and we consume one other space for the
+  // placeholder, then 11 frames are omitted in total
+  frames_omitted++;
+
+  snprintf(frames_omitted_message, frames_omitted_message_size, "%td frames omitted", frames_omitted);
+
+  // Important note: `frames_omitted_message` MUST have a lifetime that is at least as long as the call to
+  // `record_sample`. So be careful where it gets allocated. (We do have tests for this, at least!)
+  ddog_CharSlice function_name = DDOG_CHARSLICE_C("");
+  ddog_CharSlice function_filename = {.ptr = frames_omitted_message, .len = strlen(frames_omitted_message)};
+  buffer->lines[buffer->max_frames - 1] = (ddog_prof_Line) {
+    .function = (ddog_prof_Function) {.name = function_name, .filename = function_filename},
+    .line = 0,
+  };
+}
+
+// Our custom rb_profile_frames returning PLACEHOLDER_STACK_IN_NATIVE_CODE is equivalent to when the
+// Ruby `Thread#backtrace` API returns an empty array: we know that a thread is alive but we don't know what it's doing:
+//
+// 1. It can be starting up
+//    `
