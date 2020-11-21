@@ -302,4 +302,78 @@ static void maybe_add_placeholder_frames_omitted(VALUE thread, sampling_buffer* 
 // Ruby `Thread#backtrace` API returns an empty array: we know that a thread is alive but we don't know what it's doing:
 //
 // 1. It can be starting up
-//    `
+//    ```
+//    > Thread.new { sleep }.backtrace
+//    => [] # <-- note the thread hasn't actually started running sleep yet, we got there first
+//    ```
+// 2. It can be running native code
+//    ```
+//    > t = Process.detach(fork { sleep })
+//    => #<Process::Waiter:0x00007ffe7285f7a0 run>
+//    > t.backtrace
+//    => [] # <-- this can happen even minutes later, e.g. it's not a race as in 1.
+//    ```
+//    This effect has been observed in threads created by the Iodine web server and the ffi gem,
+//    see for instance https://github.com/ffi/ffi/pull/883 and https://github.com/DataDog/dd-trace-rb/pull/1719 .
+//
+// To give customers visibility into these threads, rather than reporting an empty stack, we replace the empty stack
+// with one containing a placeholder frame, so that these threads are properly represented in the UX.
+static void record_placeholder_stack_in_native_code(
+  sampling_buffer* buffer,
+  VALUE recorder_instance,
+  sample_values values,
+  ddog_prof_Slice_Label labels,
+  sampling_buffer *record_buffer,
+  int extra_frames_in_record_buffer
+) {
+  ddog_CharSlice function_name = DDOG_CHARSLICE_C("");
+  ddog_CharSlice function_filename = DDOG_CHARSLICE_C("In native code");
+  buffer->lines[0] = (ddog_prof_Line) {
+    .function = (ddog_prof_Function) {.name = function_name, .filename = function_filename},
+    .line = 0
+  };
+
+  record_sample(
+    recorder_instance,
+    (ddog_prof_Slice_Location) {.ptr = record_buffer->locations, .len = 1 + extra_frames_in_record_buffer},
+    values,
+    labels
+  );
+}
+
+sampling_buffer *sampling_buffer_new(unsigned int max_frames) {
+  if (max_frames < 5) rb_raise(rb_eArgError, "Invalid max_frames: value must be >= 5");
+  if (max_frames > MAX_FRAMES_LIMIT) rb_raise(rb_eArgError, "Invalid max_frames: value must be <= " MAX_FRAMES_LIMIT_AS_STRING);
+
+  // Note: never returns NULL; if out of memory, it calls the Ruby out-of-memory handlers
+  sampling_buffer* buffer = ruby_xcalloc(1, sizeof(sampling_buffer));
+
+  buffer->max_frames = max_frames;
+
+  buffer->stack_buffer  = ruby_xcalloc(max_frames, sizeof(VALUE));
+  buffer->lines_buffer  = ruby_xcalloc(max_frames, sizeof(int));
+  buffer->is_ruby_frame = ruby_xcalloc(max_frames, sizeof(bool));
+  buffer->locations     = ruby_xcalloc(max_frames, sizeof(ddog_prof_Location));
+  buffer->lines         = ruby_xcalloc(max_frames, sizeof(ddog_prof_Line));
+
+  // Currently we have a 1-to-1 correspondence between lines and locations, so we just initialize the locations once
+  // here and then only mutate the contents of the lines.
+  for (unsigned int i = 0; i < max_frames; i++) {
+    ddog_prof_Slice_Line lines = (ddog_prof_Slice_Line) {.ptr = &buffer->lines[i], .len = 1};
+    buffer->locations[i] = (ddog_prof_Location) {.lines = lines};
+  }
+
+  return buffer;
+}
+
+void sampling_buffer_free(sampling_buffer *buffer) {
+  if (buffer == NULL) rb_raise(rb_eArgError, "sampling_buffer_free called with NULL buffer");
+
+  ruby_xfree(buffer->stack_buffer);
+  ruby_xfree(buffer->lines_buffer);
+  ruby_xfree(buffer->is_ruby_frame);
+  ruby_xfree(buffer->locations);
+  ruby_xfree(buffer->lines);
+
+  ruby_xfree(buffer);
+}
