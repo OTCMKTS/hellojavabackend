@@ -837,3 +837,143 @@ static long update_time_since_previous_sample(long *time_at_previous_sample_ns, 
       // We don't expect non-wall time to go backwards, so let's flag this as a bug
       rb_raise(rb_eRuntimeError, "BUG: Unexpected negative elapsed_time_ns between samples");
     }
+  }
+
+  return elapsed_time_ns;
+}
+
+// Safety: This function is assumed never to raise exceptions by callers
+static long cpu_time_now_ns(struct per_thread_context *thread_context) {
+  thread_cpu_time cpu_time = thread_cpu_time_for(thread_context->thread_cpu_time_id);
+
+  if (!cpu_time.valid) {
+    // Invalidate previous state of the counter (if any), it's no longer accurate. We need to get two good reads
+    // in a row to have an accurate delta.
+    thread_context->cpu_time_at_previous_sample_ns = INVALID_TIME;
+    return 0;
+  }
+
+  return cpu_time.result_ns;
+}
+
+static long thread_id_for(VALUE thread) {
+  VALUE object_id = rb_obj_id(thread);
+
+  // The API docs for Ruby state that `rb_obj_id` COULD be a BIGNUM and that if you want to be really sure you don't
+  // get a BIGNUM, then you should use `rb_memory_id`. But `rb_memory_id` is less interesting because it's less visible
+  // at the user level than the result of calling `#object_id`.
+  //
+  // It also seems uncommon to me that we'd ever get a BIGNUM; on old Ruby versions (pre-GC compaction), the object id
+  // was the pointer to the object, so that's not going to be a BIGNUM; on modern Ruby versions, Ruby keeps
+  // a counter, and only increments it for objects for which `#object_id`/`rb_obj_id` is called (e.g. most objects
+  // won't actually have an object id allocated).
+  //
+  // So, for now, let's simplify: we only support FIXNUMs, and we won't break if we get a BIGNUM; we just won't
+  // record the thread_id (but samples will still be collected).
+  return FIXNUM_P(object_id) ? FIX2LONG(object_id) : -1;
+}
+
+VALUE enforce_thread_context_collector_instance(VALUE object) {
+  Check_TypedStruct(object, &thread_context_collector_typed_data);
+  return object;
+}
+
+// This method exists only to enable testing Datadog::Profiling::Collectors::ThreadContext behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+//
+// Returns the whole contents of the per_thread_context structs being tracked.
+static VALUE _native_stats(DDTRACE_UNUSED VALUE _self, VALUE collector_instance) {
+  struct thread_context_collector_state *state;
+  TypedData_Get_Struct(collector_instance, struct thread_context_collector_state, &thread_context_collector_typed_data, state);
+
+  return stats_as_ruby_hash(state);
+}
+
+// Assumption 1: This function is called in a thread that is holding the Global VM Lock. Caller is responsible for enforcing this.
+static void trace_identifiers_for(struct thread_context_collector_state *state, VALUE thread, struct trace_identifiers *trace_identifiers_result) {
+  if (state->tracer_context_key == MISSING_TRACER_CONTEXT_KEY) return;
+
+  VALUE current_context = rb_thread_local_aref(thread, state->tracer_context_key);
+  if (current_context == Qnil) return;
+
+  VALUE active_trace = rb_ivar_get(current_context, at_active_trace_id /* @active_trace */);
+  if (active_trace == Qnil) return;
+
+  VALUE root_span = rb_ivar_get(active_trace, at_root_span_id /* @root_span */);
+  VALUE active_span = rb_ivar_get(active_trace, at_active_span_id /* @active_span */);
+  if (root_span == Qnil || active_span == Qnil) return;
+
+  VALUE numeric_local_root_span_id = rb_ivar_get(root_span, at_id_id /* @id */);
+  VALUE numeric_span_id = rb_ivar_get(active_span, at_id_id /* @id */);
+  if (numeric_local_root_span_id == Qnil || numeric_span_id == Qnil) return;
+
+  trace_identifiers_result->local_root_span_id = NUM2ULL(numeric_local_root_span_id);
+  trace_identifiers_result->span_id = NUM2ULL(numeric_span_id);
+
+  trace_identifiers_result->valid = true;
+
+  VALUE root_span_type = rb_ivar_get(root_span, at_type_id /* @type */);
+  if (root_span_type == Qnil || !is_type_web(root_span_type)) return;
+
+  VALUE trace_resource = rb_ivar_get(active_trace, at_resource_id /* @resource */);
+  if (RB_TYPE_P(trace_resource, T_STRING)) {
+    trace_identifiers_result->trace_endpoint = trace_resource;
+  } else if (trace_resource == Qnil) {
+    // Fall back to resource from span, if any
+    trace_identifiers_result->trace_endpoint = rb_ivar_get(root_span, at_resource_id /* @resource */);
+  }
+}
+
+static bool is_type_web(VALUE root_span_type) {
+  ENFORCE_TYPE(root_span_type, T_STRING);
+
+  return RSTRING_LEN(root_span_type) == strlen("web") &&
+    (memcmp("web", StringValuePtr(root_span_type), strlen("web")) == 0);
+}
+
+// After the Ruby VM forks, this method gets called in the child process to clean up any leftover state from the parent.
+//
+// Assumption: This method gets called BEFORE restarting profiling -- e.g. there are no components attempting to
+// trigger samples at the same time.
+static VALUE _native_reset_after_fork(DDTRACE_UNUSED VALUE self, VALUE collector_instance) {
+  struct thread_context_collector_state *state;
+  TypedData_Get_Struct(collector_instance, struct thread_context_collector_state, &thread_context_collector_typed_data, state);
+
+  st_clear(state->hash_map_per_thread_context);
+
+  state->stats = (struct stats) {}; // Resets all stats back to zero
+
+  rb_funcall(state->recorder_instance, rb_intern("reset_after_fork"), 0);
+
+  return Qtrue;
+}
+
+static VALUE thread_list(struct thread_context_collector_state *state) {
+  VALUE result = state->thread_list_buffer;
+  rb_ary_clear(result);
+  ddtrace_thread_list(result);
+  return result;
+}
+
+void thread_context_collector_sample_allocation(VALUE self_instance, unsigned int sample_weight) {
+  struct thread_context_collector_state *state;
+  TypedData_Get_Struct(self_instance, struct thread_context_collector_state, &thread_context_collector_typed_data, state);
+
+  VALUE current_thread = rb_thread_current();
+
+  trigger_sample_for_thread(
+    state,
+    /* thread: */  current_thread,
+    /* stack_from_thread: */ current_thread,
+    get_or_create_context_for(current_thread, state),
+    (sample_values) {.alloc_samples = sample_weight},
+    SAMPLE_REGULAR
+  );
+}
+
+// This method exists only to enable testing Datadog::Profiling::Collectors::ThreadContext behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_sample_allocation(DDTRACE_UNUSED VALUE self, VALUE collector_instance, VALUE sample_weight) {
+  thread_context_collector_sample_allocation(collector_instance, NUM2UINT(sample_weight));
+  return Qtrue;
+}
