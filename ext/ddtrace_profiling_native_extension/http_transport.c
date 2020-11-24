@@ -278,4 +278,70 @@ static VALUE _native_do_export(
 ) {
   ENFORCE_TYPE(upload_timeout_milliseconds, T_FIXNUM);
   ENFORCE_TYPE(start_timespec_seconds, T_FIXNUM);
-  ENF
+  ENFORCE_TYPE(start_timespec_nanoseconds, T_FIXNUM);
+  ENFORCE_TYPE(finish_timespec_seconds, T_FIXNUM);
+  ENFORCE_TYPE(finish_timespec_nanoseconds, T_FIXNUM);
+  ENFORCE_TYPE(pprof_file_name, T_STRING);
+  ENFORCE_TYPE(pprof_data, T_STRING);
+  ENFORCE_TYPE(code_provenance_file_name, T_STRING);
+
+  // Code provenance can be disabled and in that case will be set to nil
+  bool have_code_provenance = !NIL_P(code_provenance_data);
+  if (have_code_provenance) ENFORCE_TYPE(code_provenance_data, T_STRING);
+
+  uint64_t timeout_milliseconds = NUM2ULONG(upload_timeout_milliseconds);
+
+  ddog_Timespec start =
+    {.seconds = NUM2LONG(start_timespec_seconds), .nanoseconds = NUM2UINT(start_timespec_nanoseconds)};
+  ddog_Timespec finish =
+    {.seconds = NUM2LONG(finish_timespec_seconds), .nanoseconds = NUM2UINT(finish_timespec_nanoseconds)};
+
+  int files_to_report = 1 + (have_code_provenance ? 1 : 0);
+  ddog_prof_Exporter_File files[files_to_report];
+  ddog_prof_Exporter_Slice_File slice_files = {.ptr = files, .len = files_to_report};
+
+  files[0] = (ddog_prof_Exporter_File) {
+    .name = char_slice_from_ruby_string(pprof_file_name),
+    .file = byte_slice_from_ruby_string(pprof_data)
+  };
+  if (have_code_provenance) {
+    files[1] = (ddog_prof_Exporter_File) {
+      .name = char_slice_from_ruby_string(code_provenance_file_name),
+      .file = byte_slice_from_ruby_string(code_provenance_data)
+    };
+  }
+
+  ddog_Vec_Tag *null_additional_tags = NULL;
+
+  ddog_prof_Exporter_NewResult exporter_result = create_exporter(exporter_configuration, tags_as_array);
+  // Note: Do not add anything that can raise exceptions after this line, as otherwise the exporter memory will leak
+
+  VALUE failure_tuple = handle_exporter_failure(exporter_result);
+  if (!NIL_P(failure_tuple)) return failure_tuple;
+
+  return perform_export(exporter_result.ok, start, finish, slice_files, null_additional_tags, timeout_milliseconds);
+}
+
+static void *call_exporter_without_gvl(void *call_args) {
+  struct call_exporter_without_gvl_arguments *args = (struct call_exporter_without_gvl_arguments*) call_args;
+
+  args->result = ddog_prof_Exporter_send(args->exporter, &args->build_result->ok, args->cancel_token);
+  args->send_ran = true;
+
+  return NULL; // Unused
+}
+
+// Called by Ruby when it wants to interrupt call_exporter_without_gvl above, e.g. when the app wants to exit cleanly
+static void interrupt_exporter_call(void *cancel_token) {
+  ddog_CancellationToken_cancel((ddog_CancellationToken *) cancel_token);
+}
+
+static VALUE ddtrace_version(void) {
+  VALUE ddtrace_module = rb_const_get(rb_cObject, rb_intern("DDTrace"));
+  ENFORCE_TYPE(ddtrace_module, T_MODULE);
+  VALUE version_module = rb_const_get(ddtrace_module, rb_intern("VERSION"));
+  ENFORCE_TYPE(version_module, T_MODULE);
+  VALUE version_string = rb_const_get(version_module, rb_intern("STRING"));
+  ENFORCE_TYPE(version_string, T_STRING);
+  return version_string;
+}
