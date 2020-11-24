@@ -179,4 +179,103 @@ static ddog_Vec_Tag convert_tags(VALUE tags_as_array) {
 }
 
 static VALUE log_failure_to_process_tag(VALUE err_details) {
-  return rb_funcall(http_t
+  return rb_funcall(http_transport_class, log_failure_to_process_tag_id, 1, err_details);
+}
+
+// Since we are calling into Ruby code, it may raise an exception. This method ensure that dynamically-allocated tags
+// get cleaned before propagating the exception.
+static void safely_log_failure_to_process_tag(ddog_Vec_Tag tags, VALUE err_details) {
+  int exception_state;
+  rb_protect(log_failure_to_process_tag, err_details, &exception_state);
+
+  if (exception_state) {           // An exception was raised
+    ddog_Vec_Tag_drop(tags); // clean up
+    rb_jump_tag(exception_state);  // "Re-raise" exception
+  }
+}
+
+// Note: This function handles a bunch of libdatadog dynamically-allocated objects, so it MUST not use any Ruby APIs
+// which can raise exceptions, otherwise the objects will be leaked.
+static VALUE perform_export(
+  ddog_prof_Exporter *exporter,
+  ddog_Timespec start,
+  ddog_Timespec finish,
+  ddog_prof_Exporter_Slice_File slice_files,
+  ddog_Vec_Tag *additional_tags,
+  uint64_t timeout_milliseconds
+) {
+  ddog_prof_ProfiledEndpointsStats *endpoints_stats = NULL; // Not in use yet
+  ddog_prof_Exporter_Request_BuildResult build_result =
+    ddog_prof_Exporter_Request_build(exporter, start, finish, slice_files, additional_tags, endpoints_stats, timeout_milliseconds);
+
+  if (build_result.tag == DDOG_PROF_EXPORTER_REQUEST_BUILD_RESULT_ERR) {
+    ddog_prof_Exporter_drop(exporter);
+    return rb_ary_new_from_args(2, error_symbol, get_error_details_and_drop(&build_result.err));
+  }
+
+  ddog_CancellationToken *cancel_token = ddog_CancellationToken_new();
+
+  // We'll release the Global VM Lock while we're calling send, so that the Ruby VM can continue to work while this
+  // is pending
+  struct call_exporter_without_gvl_arguments args =
+    {.exporter = exporter, .build_result = &build_result, .cancel_token = cancel_token, .send_ran = false};
+
+  // We use rb_thread_call_without_gvl2 instead of rb_thread_call_without_gvl as the gvl2 variant never raises any
+  // exceptions.
+  //
+  // (With rb_thread_call_without_gvl, if someone calls Thread#kill or something like it on the current thread,
+  // the exception will be raised without us being able to clean up dynamically-allocated stuff, which would leak.)
+  //
+  // Instead, we take care of our own exception checking, and delay the exception raising (`rb_jump_tag` call) until
+  // after we cleaned up any dynamically-allocated resources.
+  //
+  // We run rb_thread_call_without_gvl2 in a loop since an "interrupt" may cause it to return before even running
+  // our code. In such a case, we retry the call -- unless the interrupt was caused by an exception being pending,
+  // and in that case we also give up and break out of the loop.
+  int pending_exception = 0;
+
+  while (!args.send_ran && !pending_exception) {
+    rb_thread_call_without_gvl2(call_exporter_without_gvl, &args, interrupt_exporter_call, cancel_token);
+
+    // To make sure we don't leak memory, we never check for pending exceptions if send ran
+    if (!args.send_ran) pending_exception = check_if_pending_exception();
+  }
+
+  // Cleanup exporter and token, no longer needed
+  ddog_CancellationToken_drop(cancel_token);
+  ddog_prof_Exporter_drop(exporter);
+
+  if (pending_exception) {
+    // If we got here send did not run, so we need to explicitly dispose of the request
+    ddog_prof_Exporter_Request_drop(&build_result.ok);
+
+    // Let Ruby propagate the exception. This will not return.
+    rb_jump_tag(pending_exception);
+  }
+
+  // The request itself does not need to be freed as libdatadog takes ownership of it as part of sending.
+
+  ddog_prof_Exporter_SendResult result = args.result;
+
+  return result.tag == DDOG_PROF_EXPORTER_SEND_RESULT_HTTP_RESPONSE ?
+    rb_ary_new_from_args(2, ok_symbol, UINT2NUM(result.http_response.code)) :
+    rb_ary_new_from_args(2, error_symbol, get_error_details_and_drop(&result.err));
+}
+
+static VALUE _native_do_export(
+  DDTRACE_UNUSED VALUE _self,
+  VALUE exporter_configuration,
+  VALUE upload_timeout_milliseconds,
+  VALUE start_timespec_seconds,
+  VALUE start_timespec_nanoseconds,
+  VALUE finish_timespec_seconds,
+  VALUE finish_timespec_nanoseconds,
+  VALUE pprof_file_name,
+  VALUE pprof_data,
+  VALUE code_provenance_file_name,
+  VALUE code_provenance_data,
+  VALUE tags_as_array
+) {
+  ENFORCE_TYPE(upload_timeout_milliseconds, T_FIXNUM);
+  ENFORCE_TYPE(start_timespec_seconds, T_FIXNUM);
+  ENF
