@@ -418,3 +418,316 @@ int ddtrace_rb_profile_frames(VALUE thread, int start, int limit, VALUE *buff, i
     const rb_thread_t *ec = th;
 #endif
     const rb_control_frame_t *cfp = ec->cfp, *end_cfp = RUBY_VM_END_CONTROL_FRAME(ec);
+    const rb_callable_method_entry_t *cme;
+
+    // Avoid sampling dead threads
+    if (th->status == THREAD_KILLED) return 0;
+
+    // `vm_backtrace.c` includes this check in several methods. This happens on newly-created threads, and may
+    // also (not entirely sure) happen on dead threads
+    if (end_cfp == NULL) return PLACEHOLDER_STACK_IN_NATIVE_CODE;
+
+    // This should not happen for ddtrace (it can only happen when a thread is still being created), but I've imported
+    // it from https://github.com/ruby/ruby/pull/7116 in a "just in case" kind of mindset.
+    if (cfp == NULL) return 0;
+
+    // Fix: Skip dummy frame that shows up in main thread.
+    //
+    // According to a comment in `backtrace_each` (`vm_backtrace.c`), there's two dummy frames that we should ignore
+    // at the base of every thread's stack.
+    // (see https://github.com/ruby/ruby/blob/4bd38e8120f2fdfdd47a34211720e048502377f1/vm_backtrace.c#L890-L914 )
+    //
+    // One is being pointed to by `RUBY_VM_END_CONTROL_FRAME(ec)`, and so we need to advance to the next one, and
+    // reaching it will be used as a condition to break out of the loop below.
+    //
+    // Note that in `backtrace_each` there's two calls to `RUBY_VM_NEXT_CONTROL_FRAME`, but the loop bounds there
+    // are computed in a different way, so the two calls really are equivalent to one here.
+    end_cfp = RUBY_VM_NEXT_CONTROL_FRAME(end_cfp);
+
+    // See comment on `record_placeholder_stack_in_native_code` for a full explanation of what this means (and why we don't just return 0)
+    if (end_cfp <= cfp) return PLACEHOLDER_STACK_IN_NATIVE_CODE;
+
+    for (i=0; i<limit && cfp != end_cfp;) {
+        if (cfp->iseq && !cfp->pc) {
+          // Fix: Do nothing -- this frame should not be used
+          //
+          // rb_profile_frames does not do this check, but `backtrace_each` (`vm_backtrace.c`) does. This frame is not
+          // exposed by the Ruby backtrace APIs and for now we want to match its behavior 1:1
+        }
+#ifndef USE_ISEQ_P_INSTEAD_OF_RUBYFRAME_P // Modern Rubies
+        else if (VM_FRAME_RUBYFRAME_P(cfp)) {
+#else // Ruby < 2.4
+        else if (RUBY_VM_NORMAL_ISEQ_P(cfp->iseq)) {
+#endif
+            if (start > 0) {
+                start--;
+                continue;
+            }
+
+            /* record frame info */
+            cme = rb_vm_frame_method_entry(cfp);
+
+            if (cme && cme->def->type == VM_METHOD_TYPE_ISEQ &&
+              // Fix: Do not use callable method entry when iseq is for an eval.
+              // TL;DR: This fix is needed for us to match the Ruby reference API information in the
+              // "when sampling an eval/instance eval inside an object" spec.
+              //
+              // Longer note:
+              // When a frame is a ruby frame (VM_FRAME_RUBYFRAME_P above), we can get information about it
+              // by introspecting both the callable method entry, as well as the iseq directly.
+              // Often they match... but sometimes they provide different info (as in the "iseq for an eval" situation
+              // here).
+              // If my reading of vm_backtrace.c is correct, the actual Ruby stack trace API **never** uses the
+              // callable method entry for Ruby frames, but only for VM_METHOD_TYPE_CFUNC (see `backtrace_each` method
+              // on that file).
+              // So... why does `rb_profile_frames` do something different? Is it a bug? Is it because it exposes
+              // more information than the Ruby stack frame API?
+              // As a final note, the `backtracie` gem (https://github.com/ivoanjo/backtracie) can be used to introspect
+              // the full metadata provided by both the callable method entry as well as the iseq, and is really useful
+              // to debug and learn more about these differences.
+              cfp->iseq->body->type != ISEQ_TYPE_EVAL) {
+                buff[i] = (VALUE)cme;
+            }
+            else {
+                buff[i] = (VALUE)cfp->iseq;
+            }
+
+            lines[i] = calc_lineno(cfp->iseq, cfp->pc);
+            is_ruby_frame[i] = true;
+            i++;
+        }
+        else {
+            cme = rb_vm_frame_method_entry(cfp);
+            if (cme && cme->def->type == VM_METHOD_TYPE_CFUNC) {
+                buff[i] = (VALUE)cme;
+                lines[i] = 0;
+                is_ruby_frame[i] = false;
+                i++;
+            }
+        }
+        cfp = RUBY_VM_PREVIOUS_CONTROL_FRAME(cfp);
+    }
+
+    return i;
+}
+
+#ifdef USE_BACKPORTED_RB_PROFILE_FRAME_METHOD_NAME
+
+// Taken from upstream vm_backtrace.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) 1993-2012 Yukihiro Matsumoto
+// to support our custom rb_profile_frame_method_name (see below)
+// Modifications: None
+static VALUE
+id2str(ID id)
+{
+    VALUE str = rb_id2str(id);
+    if (!str) return Qnil;
+    return str;
+}
+#define rb_id2str(id) id2str(id)
+
+// Taken from upstream vm_backtrace.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) 1993-2012 Yukihiro Matsumoto
+// to support our custom rb_profile_frame_method_name (see below)
+// Modifications: None
+static const rb_iseq_t *
+frame2iseq(VALUE frame)
+{
+    if (NIL_P(frame)) return NULL;
+
+    if (RB_TYPE_P(frame, T_IMEMO)) {
+    switch (imemo_type(frame)) {
+      case imemo_iseq:
+        return (const rb_iseq_t *)frame;
+      case imemo_ment:
+        {
+        const rb_callable_method_entry_t *cme = (rb_callable_method_entry_t *)frame;
+        switch (cme->def->type) {
+          case VM_METHOD_TYPE_ISEQ:
+            return cme->def->body.iseq.iseqptr;
+          default:
+            return NULL;
+        }
+        }
+      default:
+        break;
+    }
+    }
+    rb_bug("frame2iseq: unreachable");
+}
+
+// Taken from upstream vm_backtrace.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) 1993-2012 Yukihiro Matsumoto
+// to support our custom rb_profile_frame_method_name (see below)
+// Modifications: None
+static const rb_callable_method_entry_t *
+cframe(VALUE frame)
+{
+    if (NIL_P(frame)) return NULL;
+
+    if (RB_TYPE_P(frame, T_IMEMO)) {
+    switch (imemo_type(frame)) {
+      case imemo_ment:
+            {
+        const rb_callable_method_entry_t *cme = (rb_callable_method_entry_t *)frame;
+        switch (cme->def->type) {
+          case VM_METHOD_TYPE_CFUNC:
+            return cme;
+          default:
+            return NULL;
+        }
+            }
+          default:
+            return NULL;
+        }
+    }
+
+    return NULL;
+}
+
+// Taken from upstream vm_backtrace.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) 1993-2012 Yukihiro Matsumoto
+//
+// Ruby 3.0 finally added support for showing CFUNC frames (frames for methods written using native code)
+// in stack traces gathered via `rb_profile_frames` (https://github.com/ruby/ruby/pull/3299).
+// To access this information on older Rubies, beyond using our custom `ddtrace_rb_profile_frames` above, we also need
+// to backport the Ruby 3.0+ version of `rb_profile_frame_method_name`.
+//
+// Modifications:
+// * Renamed rb_profile_frame_method_name => ddtrace_rb_profile_frame_method_name
+VALUE
+ddtrace_rb_profile_frame_method_name(VALUE frame)
+{
+    const rb_callable_method_entry_t *cme = cframe(frame);
+    if (cme) {
+        ID mid = cme->def->original_id;
+        return id2str(mid);
+    }
+    const rb_iseq_t *iseq = frame2iseq(frame);
+    return iseq ? rb_iseq_method_name(iseq) : Qnil;
+}
+
+#endif // USE_BACKPORTED_RB_PROFILE_FRAME_METHOD_NAME
+
+// Support code for older Rubies that cannot use the MJIT header
+#ifndef RUBY_MJIT_HEADER
+
+#define MJIT_STATIC // No-op on older Rubies
+
+// Taken from upstream include/ruby/backward/2/bool.h at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) Ruby developers <ruby-core@ruby-lang.org>
+// to support our custom rb_profile_frames (see above)
+// Modifications: None
+#ifndef FALSE
+# define FALSE false
+#elif FALSE
+# error FALSE must be false
+#endif
+
+#ifndef TRUE
+# define TRUE true
+#elif ! TRUE
+# error TRUE must be true
+#endif
+
+// Taken from upstream vm_insnhelper.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+// Copyright (C) 2007 Koichi Sasada
+// to support our custom rb_profile_frames (see above)
+// Modifications: None
+static rb_callable_method_entry_t *
+check_method_entry(VALUE obj, int can_be_svar)
+{
+    if (obj == Qfalse) return NULL;
+
+#if VM_CHECK_MODE > 0
+    if (!RB_TYPE_P(obj, T_IMEMO)) rb_bug("check_method_entry: unknown type: %s", rb_obj_info(obj));
+#endif
+
+    switch (imemo_type(obj)) {
+      case imemo_ment:
+        return (rb_callable_method_entry_t *)obj;
+      case imemo_cref:
+        return NULL;
+      case imemo_svar:
+        if (can_be_svar) {
+            return check_method_entry(((struct vm_svar *)obj)->cref_or_me, FALSE);
+        }
+      default:
+#if VM_CHECK_MODE > 0
+        rb_bug("check_method_entry: svar should not be there:");
+#endif
+        return NULL;
+    }
+}
+
+#ifndef USE_LEGACY_RB_VM_FRAME_METHOD_ENTRY
+  // Taken from upstream vm_insnhelper.c at commit 5f10bd634fb6ae8f74a4ea730176233b0ca96954 (March 2022, Ruby 3.2 trunk)
+  // Copyright (C) 2007 Koichi Sasada
+  // to support our custom rb_profile_frames (see above)
+  //
+  // While older Rubies may have this function, the symbol is not exported which leads to dynamic loader issues, e.g.
+  // `dyld: lazy symbol binding failed: Symbol not found: _rb_vm_frame_method_entry`.
+  //
+  // Modifications: None
+  MJIT_STATIC const rb_callable_method_entry_t *
+  rb_vm_frame_method_entry(const rb_control_frame_t *cfp)
+  {
+      const VALUE *ep = cfp->ep;
+      rb_callable_method_entry_t *me;
+
+      while (!VM_ENV_LOCAL_P(ep)) {
+          if ((me = check_method_entry(ep[VM_ENV_DATA_INDEX_ME_CREF], FALSE)) != NULL) return me;
+          ep = VM_ENV_PREV_EP(ep);
+      }
+
+      return check_method_entry(ep[VM_ENV_DATA_INDEX_ME_CREF], TRUE);
+  }
+#else
+  // Taken from upstream vm_insnhelper.c at commit 556e9f726e2b80f6088982c6b43abfe68bfad591 (October 2018, ruby_2_3 branch)
+  // Copyright (C) 2007 Koichi Sasada
+  // to support our custom rb_profile_frames (see above)
+  //
+  // Quite a few macros in this function changed after Ruby 2.3. Rather than trying to fix the Ruby 3.2 version to work
+  // with 2.3 constants, I decided to import the Ruby 2.3 version.
+  //
+  // Modifications: None
+  const rb_callable_method_entry_t *
+  rb_vm_frame_method_entry(const rb_control_frame_t *cfp)
+  {
+      VALUE *ep = cfp->ep;
+      rb_callable_method_entry_t *me;
+
+      while (!VM_EP_LEP_P(ep)) {
+          if ((me = check_method_entry(ep[-1], FALSE)) != NULL) return me;
+          ep = VM_EP_PREV_EP(ep);
+      }
+
+      return check_method_entry(ep[-1], TRUE);
+  }
+#endif // USE_LEGACY_RB_VM_FRAME_METHOD_ENTRY
+#endif // RUBY_MJIT_HEADER
+
+#ifndef NO_RACTORS
+  // This API and definition are exported as a public symbol by the VM BUT the function header is not defined in any public header, so we
+  // repeat it here to be able to use in our code.
+  bool rb_ractor_main_p_(void);
+  extern struct rb_ractor_struct *ruby_single_main_ractor;
+
+  // Taken from upstream ractor_core.h at commit d9cf0388599a3234b9f3c06ddd006cd59a58ab8b (November 2022, Ruby 3.2 trunk)
+  // to allow us to ensure that we're always operating on the main ractor (if Ruby has ractors)
+  // Modifications:
+  // * None
+  bool ddtrace_rb_ractor_main_p(void)
+  {
+      if (ruby_single_main_ractor) {
+          return true;
+      }
+      else {
+          return rb_ractor_main_p_();
+      }
+  }
+#else
+  // Simplify callers on older Rubies, instead of having them probe if the VM supports Ractors we just tell them that yes
+  // they're always on the main Ractor
+  bool ddtrace_rb_ractor_main_p(void) { return true; }
+#endif // NO_RACTORS
