@@ -137,4 +137,89 @@ static VALUE stack_recorder_class = Qnil;
 //
 // ```
 // compiling ../../../../ext/ddtrace_profiling_native_extension/stack_recorder.c
-// ../../../../ext/ddtrace_profiling_native_extens
+// ../../../../ext/ddtrace_profiling_native_extension/stack_recorder.c:23:1: error: initializer element is not constant
+// static const ddog_prof_ValueType enabled_value_types[] = {CPU_TIME_VALUE, CPU_SAMPLES_VALUE, WALL_TIME_VALUE};
+// ^
+// ```
+#define VALUE_STRING(string) {.ptr = "" string, .len = sizeof(string) - 1}
+
+#define CPU_TIME_VALUE          {.type_ = VALUE_STRING("cpu-time"),          .unit = VALUE_STRING("nanoseconds")}
+#define CPU_TIME_VALUE_ID 0
+#define CPU_SAMPLES_VALUE       {.type_ = VALUE_STRING("cpu-samples"),       .unit = VALUE_STRING("count")}
+#define CPU_SAMPLES_VALUE_ID 1
+#define WALL_TIME_VALUE         {.type_ = VALUE_STRING("wall-time"),         .unit = VALUE_STRING("nanoseconds")}
+#define WALL_TIME_VALUE_ID 2
+#define ALLOC_SAMPLES_VALUE     {.type_ = VALUE_STRING("alloc-samples"),     .unit = VALUE_STRING("count")}
+#define ALLOC_SAMPLES_VALUE_ID 3
+
+static const ddog_prof_ValueType all_value_types[] = {CPU_TIME_VALUE, CPU_SAMPLES_VALUE, WALL_TIME_VALUE, ALLOC_SAMPLES_VALUE};
+
+// This array MUST be kept in sync with all_value_types above and is intended to act as a "hashmap" between VALUE_ID and the position it
+// occupies on the all_value_types array.
+// E.g. all_value_types_positions[CPU_TIME_VALUE_ID] => 0, means that CPU_TIME_VALUE was declared at position 0 of all_value_types.
+static const uint8_t all_value_types_positions[] = {CPU_TIME_VALUE_ID, CPU_SAMPLES_VALUE_ID, WALL_TIME_VALUE_ID, ALLOC_SAMPLES_VALUE_ID};
+
+#define ALL_VALUE_TYPES_COUNT (sizeof(all_value_types) / sizeof(ddog_prof_ValueType))
+
+// Contains native state for each instance
+struct stack_recorder_state {
+  pthread_mutex_t slot_one_mutex;
+  ddog_prof_Profile *slot_one_profile;
+
+  pthread_mutex_t slot_two_mutex;
+  ddog_prof_Profile *slot_two_profile;
+
+  short active_slot; // MUST NEVER BE ACCESSED FROM record_sample; this is NOT for the sampler thread to use.
+
+  uint8_t position_for[ALL_VALUE_TYPES_COUNT];
+  uint8_t enabled_values_count;
+};
+
+// Used to return a pair of values from sampler_lock_active_profile()
+struct active_slot_pair {
+  pthread_mutex_t *mutex;
+  ddog_prof_Profile *profile;
+};
+
+struct call_serialize_without_gvl_arguments {
+  // Set by caller
+  struct stack_recorder_state *state;
+  ddog_Timespec finish_timestamp;
+
+  // Set by callee
+  ddog_prof_Profile *profile;
+  ddog_prof_Profile_SerializeResult result;
+
+  // Set by both
+  bool serialize_ran;
+};
+
+static VALUE _native_new(VALUE klass);
+static void initialize_slot_concurrency_control(struct stack_recorder_state *state);
+static void stack_recorder_typed_data_free(void *data);
+static VALUE _native_initialize(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance, VALUE cpu_time_enabled, VALUE alloc_samples_enabled);
+static VALUE _native_serialize(VALUE self, VALUE recorder_instance);
+static VALUE ruby_time_from(ddog_Timespec ddprof_time);
+static void *call_serialize_without_gvl(void *call_args);
+static struct active_slot_pair sampler_lock_active_profile();
+static void sampler_unlock_active_profile(struct active_slot_pair active_slot);
+static ddog_prof_Profile *serializer_flip_active_and_inactive_slots(struct stack_recorder_state *state);
+static VALUE _native_active_slot(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance);
+static VALUE _native_is_slot_one_mutex_locked(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance);
+static VALUE _native_is_slot_two_mutex_locked(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance);
+static VALUE test_slot_mutex_state(VALUE recorder_instance, int slot);
+static ddog_Timespec time_now(void);
+static VALUE _native_reset_after_fork(DDTRACE_UNUSED VALUE self, VALUE recorder_instance);
+static void serializer_set_start_timestamp_for_next_profile(struct stack_recorder_state *state, ddog_Timespec timestamp);
+static VALUE _native_record_endpoint(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance, VALUE local_root_span_id, VALUE endpoint);
+
+void stack_recorder_init(VALUE profiling_module) {
+  stack_recorder_class = rb_define_class_under(profiling_module, "StackRecorder", rb_cObject);
+  // Hosts methods used for testing the native code using RSpec
+  VALUE testing_module = rb_define_module_under(stack_recorder_class, "Testing");
+
+  // Instances of the StackRecorder class are "TypedData" objects.
+  // "TypedData" objects are special objects in the Ruby VM that can wrap C structs.
+  // In this case, it wraps the stack_recorder_state.
+  //
+  // Because Ruby doesn't know how to initialize native-leve
