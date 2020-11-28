@@ -222,4 +222,86 @@ void stack_recorder_init(VALUE profiling_module) {
   // "TypedData" objects are special objects in the Ruby VM that can wrap C structs.
   // In this case, it wraps the stack_recorder_state.
   //
-  // Because Ruby doesn't know how to initialize native-leve
+  // Because Ruby doesn't know how to initialize native-level structs, we MUST override the allocation function for objects
+  // of this class so that we can manage this part. Not overriding or disabling the allocation function is a common
+  // gotcha for "TypedData" objects that can very easily lead to VM crashes, see for instance
+  // https://bugs.ruby-lang.org/issues/18007 for a discussion around this.
+  rb_define_alloc_func(stack_recorder_class, _native_new);
+
+  rb_define_singleton_method(stack_recorder_class, "_native_initialize", _native_initialize, 3);
+  rb_define_singleton_method(stack_recorder_class, "_native_serialize",  _native_serialize, 1);
+  rb_define_singleton_method(stack_recorder_class, "_native_reset_after_fork", _native_reset_after_fork, 1);
+  rb_define_singleton_method(testing_module, "_native_active_slot", _native_active_slot, 1);
+  rb_define_singleton_method(testing_module, "_native_slot_one_mutex_locked?", _native_is_slot_one_mutex_locked, 1);
+  rb_define_singleton_method(testing_module, "_native_slot_two_mutex_locked?", _native_is_slot_two_mutex_locked, 1);
+  rb_define_singleton_method(testing_module, "_native_record_endpoint", _native_record_endpoint, 3);
+
+  ok_symbol = ID2SYM(rb_intern_const("ok"));
+  error_symbol = ID2SYM(rb_intern_const("error"));
+}
+
+// This structure is used to define a Ruby object that stores a pointer to a ddog_prof_Profile instance
+// See also https://github.com/ruby/ruby/blob/master/doc/extension.rdoc for how this works
+static const rb_data_type_t stack_recorder_typed_data = {
+  .wrap_struct_name = "Datadog::Profiling::StackRecorder",
+  .function = {
+    .dfree = stack_recorder_typed_data_free,
+    .dsize = NULL, // We don't track profile memory usage (although it'd be cool if we did!)
+    // No need to provide dmark nor dcompact because we don't directly reference Ruby VALUEs from inside this object
+  },
+  .flags = RUBY_TYPED_FREE_IMMEDIATELY
+};
+
+static VALUE _native_new(VALUE klass) {
+  struct stack_recorder_state *state = ruby_xcalloc(1, sizeof(struct stack_recorder_state));
+
+  ddog_prof_Slice_ValueType sample_types = {.ptr = all_value_types, .len = ALL_VALUE_TYPES_COUNT};
+
+  initialize_slot_concurrency_control(state);
+  for (uint8_t i = 0; i < ALL_VALUE_TYPES_COUNT; i++) { state->position_for[i] = all_value_types_positions[i]; }
+  state->enabled_values_count = ALL_VALUE_TYPES_COUNT;
+
+  // Note: Don't raise exceptions after this point, since it'll lead to libdatadog memory leaking!
+
+  state->slot_one_profile = ddog_prof_Profile_new(sample_types, NULL /* period is optional */, NULL /* start_time is optional */);
+  state->slot_two_profile = ddog_prof_Profile_new(sample_types, NULL /* period is optional */, NULL /* start_time is optional */);
+
+  return TypedData_Wrap_Struct(klass, &stack_recorder_typed_data, state);
+}
+
+static void initialize_slot_concurrency_control(struct stack_recorder_state *state) {
+  state->slot_one_mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+  state->slot_two_mutex = (pthread_mutex_t) PTHREAD_MUTEX_INITIALIZER;
+
+  // A newly-created StackRecorder starts with slot one being active for samples, so let's lock slot two
+  ENFORCE_SUCCESS_GVL(pthread_mutex_lock(&state->slot_two_mutex));
+
+  state->active_slot = 1;
+}
+
+static void stack_recorder_typed_data_free(void *state_ptr) {
+  struct stack_recorder_state *state = (struct stack_recorder_state *) state_ptr;
+
+  pthread_mutex_destroy(&state->slot_one_mutex);
+  ddog_prof_Profile_drop(state->slot_one_profile);
+
+  pthread_mutex_destroy(&state->slot_two_mutex);
+  ddog_prof_Profile_drop(state->slot_two_profile);
+
+  ruby_xfree(state);
+}
+
+static VALUE _native_initialize(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance, VALUE cpu_time_enabled, VALUE alloc_samples_enabled) {
+  ENFORCE_BOOLEAN(cpu_time_enabled);
+  ENFORCE_BOOLEAN(alloc_samples_enabled);
+
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  if (cpu_time_enabled == Qtrue && alloc_samples_enabled == Qtrue) return Qtrue; // Nothing to do, this is the default
+
+  // When some sample types are disabled, we need to reconfigure libdatadog to record less types,
+  // as well as reconfigure the position_for array to push the disabled types to the end so they don't get recorded.
+  // See record_sample for details on the use of position_for.
+
+  state->enabled_values_count = ALL_VALUE_TYPES_COUNT - (cpu_time_enabled 
