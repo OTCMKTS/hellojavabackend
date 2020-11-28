@@ -304,4 +304,98 @@ static VALUE _native_initialize(DDTRACE_UNUSED VALUE _self, VALUE recorder_insta
   // as well as reconfigure the position_for array to push the disabled types to the end so they don't get recorded.
   // See record_sample for details on the use of position_for.
 
-  state->enabled_values_count = ALL_VALUE_TYPES_COUNT - (cpu_time_enabled 
+  state->enabled_values_count = ALL_VALUE_TYPES_COUNT - (cpu_time_enabled == Qtrue ? 0 : 1) - (alloc_samples_enabled == Qtrue? 0 : 1);
+
+  ddog_prof_ValueType enabled_value_types[ALL_VALUE_TYPES_COUNT];
+  uint8_t next_enabled_pos = 0;
+  uint8_t next_disabled_pos = state->enabled_values_count;
+
+  // CPU_SAMPLES_VALUE is always enabled
+  enabled_value_types[next_enabled_pos] = (ddog_prof_ValueType) CPU_SAMPLES_VALUE;
+  state->position_for[CPU_SAMPLES_VALUE_ID] = next_enabled_pos++;
+
+  // WALL_TIME_VALUE is always enabled
+  enabled_value_types[next_enabled_pos] = (ddog_prof_ValueType) WALL_TIME_VALUE;
+  state->position_for[WALL_TIME_VALUE_ID] = next_enabled_pos++;
+
+  if (cpu_time_enabled == Qtrue) {
+    enabled_value_types[next_enabled_pos] = (ddog_prof_ValueType) CPU_TIME_VALUE;
+    state->position_for[CPU_TIME_VALUE_ID] = next_enabled_pos++;
+  } else {
+    state->position_for[CPU_TIME_VALUE_ID] = next_disabled_pos++;
+  }
+
+  if (alloc_samples_enabled == Qtrue) {
+    enabled_value_types[next_enabled_pos] = (ddog_prof_ValueType) ALLOC_SAMPLES_VALUE;
+    state->position_for[ALLOC_SAMPLES_VALUE_ID] = next_enabled_pos++;
+  } else {
+    state->position_for[ALLOC_SAMPLES_VALUE_ID] = next_disabled_pos++;
+  }
+
+  ddog_prof_Slice_ValueType sample_types = {.ptr = enabled_value_types, .len = state->enabled_values_count};
+
+  ddog_prof_Profile_drop(state->slot_one_profile);
+  ddog_prof_Profile_drop(state->slot_two_profile);
+
+  state->slot_one_profile = ddog_prof_Profile_new(sample_types, NULL /* period is optional */, NULL /* start_time is optional */);
+  state->slot_two_profile = ddog_prof_Profile_new(sample_types, NULL /* period is optional */, NULL /* start_time is optional */);
+
+  return Qtrue;
+}
+
+static VALUE _native_serialize(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  ddog_Timespec finish_timestamp = time_now();
+  // Need to do this while still holding on to the Global VM Lock; see comments on method for why
+  serializer_set_start_timestamp_for_next_profile(state, finish_timestamp);
+
+  // We'll release the Global VM Lock while we're calling serialize, so that the Ruby VM can continue to work while this
+  // is pending
+  struct call_serialize_without_gvl_arguments args = {.state = state, .finish_timestamp = finish_timestamp, .serialize_ran = false};
+
+  while (!args.serialize_ran) {
+    // Give the Ruby VM an opportunity to process any pending interruptions (including raising exceptions).
+    // Note that it's OK to do this BEFORE call_serialize_without_gvl runs BUT NOT AFTER because afterwards
+    // there's heap-allocated memory that MUST be cleaned before raising any exception.
+    //
+    // Note that we run this in a loop because `rb_thread_call_without_gvl2` may return multiple times due to
+    // pending interrupts until it actually runs our code.
+    process_pending_interruptions(Qnil);
+
+    // We use rb_thread_call_without_gvl2 here because unlike the regular _gvl variant, gvl2 does not process
+    // interruptions and thus does not raise exceptions after running our code.
+    rb_thread_call_without_gvl2(call_serialize_without_gvl, &args, NULL /* No interruption function needed in this case */, NULL /* Not needed */);
+  }
+
+  ddog_prof_Profile_SerializeResult serialized_profile = args.result;
+
+  if (serialized_profile.tag == DDOG_PROF_PROFILE_SERIALIZE_RESULT_ERR) {
+    return rb_ary_new_from_args(2, error_symbol, get_error_details_and_drop(&serialized_profile.err));
+  }
+
+  VALUE encoded_pprof = ruby_string_from_vec_u8(serialized_profile.ok.buffer);
+
+  ddog_Timespec ddprof_start = serialized_profile.ok.start;
+  ddog_Timespec ddprof_finish = serialized_profile.ok.end;
+
+  ddog_prof_EncodedProfile_drop(&serialized_profile.ok);
+
+  VALUE start = ruby_time_from(ddprof_start);
+  VALUE finish = ruby_time_from(ddprof_finish);
+
+  if (!ddog_prof_Profile_reset(args.profile, NULL /* start_time is optional */ )) {
+    return rb_ary_new_from_args(2, error_symbol, rb_str_new_cstr("Failed to reset profile"));
+  }
+
+  return rb_ary_new_from_args(2, ok_symbol, rb_ary_new_from_args(3, start, finish, encoded_pprof));
+}
+
+static VALUE ruby_time_from(ddog_Timespec ddprof_time) {
+  const int utc = INT_MAX - 1; // From Ruby sources
+  struct timespec time = {.tv_sec = ddprof_time.seconds, .tv_nsec = ddprof_time.nanoseconds};
+  return rb_time_timespec_new(&time, utc);
+}
+
+void record_sample(VALUE re
