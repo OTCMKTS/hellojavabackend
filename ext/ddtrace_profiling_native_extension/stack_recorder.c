@@ -398,4 +398,99 @@ static VALUE ruby_time_from(ddog_Timespec ddprof_time) {
   return rb_time_timespec_new(&time, utc);
 }
 
-void record_sample(VALUE re
+void record_sample(VALUE recorder_instance, ddog_prof_Slice_Location locations, sample_values values, ddog_prof_Slice_Label labels) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  struct active_slot_pair active_slot = sampler_lock_active_profile(state);
+
+  // Note: We initialize this array to have ALL_VALUE_TYPES_COUNT but only tell libdatadog to use the first
+  // state->enabled_values_count values. This simplifies handling disabled value types -- we still put them on the
+  // array, but in _native_initialize we arrange so their position starts from state->enabled_values_count and thus
+  // libdatadog doesn't touch them.
+  int64_t metric_values[ALL_VALUE_TYPES_COUNT] = {0};
+  uint8_t *position_for = state->position_for;
+
+  metric_values[position_for[CPU_TIME_VALUE_ID]]      = values.cpu_time_ns;
+  metric_values[position_for[CPU_SAMPLES_VALUE_ID]]   = values.cpu_samples;
+  metric_values[position_for[WALL_TIME_VALUE_ID]]     = values.wall_time_ns;
+  metric_values[position_for[ALLOC_SAMPLES_VALUE_ID]] = values.alloc_samples;
+
+  ddog_prof_Profile_AddResult result = ddog_prof_Profile_add(
+    active_slot.profile,
+    (ddog_prof_Sample) {
+      .locations = locations,
+      .values = (ddog_Slice_I64) {.ptr = metric_values, .len = state->enabled_values_count},
+      .labels = labels
+    }
+  );
+
+  sampler_unlock_active_profile(active_slot);
+
+  if (result.tag == DDOG_PROF_PROFILE_ADD_RESULT_ERR) {
+    rb_raise(rb_eArgError, "Failed to record sample: %"PRIsVALUE, get_error_details_and_drop(&result.err));
+  }
+}
+
+void record_endpoint(VALUE recorder_instance, uint64_t local_root_span_id, ddog_CharSlice endpoint) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  struct active_slot_pair active_slot = sampler_lock_active_profile(state);
+
+  ddog_prof_Profile_set_endpoint(active_slot.profile, local_root_span_id, endpoint);
+
+  sampler_unlock_active_profile(active_slot);
+}
+
+static void *call_serialize_without_gvl(void *call_args) {
+  struct call_serialize_without_gvl_arguments *args = (struct call_serialize_without_gvl_arguments *) call_args;
+
+  args->profile = serializer_flip_active_and_inactive_slots(args->state);
+  args->result = ddog_prof_Profile_serialize(args->profile, &args->finish_timestamp, NULL /* duration_nanos is optional */);
+  args->serialize_ran = true;
+
+  return NULL; // Unused
+}
+
+VALUE enforce_recorder_instance(VALUE object) {
+  Check_TypedStruct(object, &stack_recorder_typed_data);
+  return object;
+}
+
+static struct active_slot_pair sampler_lock_active_profile(struct stack_recorder_state *state) {
+  int error;
+
+  for (int attempts = 0; attempts < 2; attempts++) {
+    error = pthread_mutex_trylock(&state->slot_one_mutex);
+    if (error && error != EBUSY) ENFORCE_SUCCESS_GVL(error);
+
+    // Slot one is active
+    if (!error) return (struct active_slot_pair) {.mutex = &state->slot_one_mutex, .profile = state->slot_one_profile};
+
+    // If we got here, slot one was not active, let's try slot two
+
+    error = pthread_mutex_trylock(&state->slot_two_mutex);
+    if (error && error != EBUSY) ENFORCE_SUCCESS_GVL(error);
+
+    // Slot two is active
+    if (!error) return (struct active_slot_pair) {.mutex = &state->slot_two_mutex, .profile = state->slot_two_profile};
+  }
+
+  // We already tried both multiple times, and we did not succeed. This is not expected to happen. Let's stop sampling.
+  rb_raise(rb_eRuntimeError, "Failed to grab either mutex in sampler_lock_active_profile");
+}
+
+static void sampler_unlock_active_profile(struct active_slot_pair active_slot) {
+  ENFORCE_SUCCESS_GVL(pthread_mutex_unlock(active_slot.mutex));
+}
+
+static ddog_prof_Profile *serializer_flip_active_and_inactive_slots(struct stack_recorder_state *state) {
+  int previously_active_slot = state->active_slot;
+
+  if (previously_active_slot != 1 && previously_active_slot != 2) {
+    grab_gvl_and_raise(rb_eRuntimeError, "Unexpected active_slot state %d in serializer_flip_active_and_inactive_slots", previously_active_slot);
+  }
+
+  pthread_mutex_t *previously_active = (previously_active_slot == 1) ? &state->slot_one_mutex : &state->slot_two_mutex;
+  pthread_mutex_t *previously_inactive = (previously_active_slot == 1) ? &state->slot_two_mutex : &sta
