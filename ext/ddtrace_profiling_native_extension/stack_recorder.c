@@ -493,4 +493,92 @@ static ddog_prof_Profile *serializer_flip_active_and_inactive_slots(struct stack
   }
 
   pthread_mutex_t *previously_active = (previously_active_slot == 1) ? &state->slot_one_mutex : &state->slot_two_mutex;
-  pthread_mutex_t *previously_inactive = (previously_active_slot == 1) ? &state->slot_two_mutex : &sta
+  pthread_mutex_t *previously_inactive = (previously_active_slot == 1) ? &state->slot_two_mutex : &state->slot_one_mutex;
+
+  // Release the lock, thus making this slot active
+  ENFORCE_SUCCESS_NO_GVL(pthread_mutex_unlock(previously_inactive));
+
+  // Grab the lock, thus making this slot inactive
+  ENFORCE_SUCCESS_NO_GVL(pthread_mutex_lock(previously_active));
+
+  // Update active_slot
+  state->active_slot = (previously_active_slot == 1) ? 2 : 1;
+
+  // Return profile for previously active slot (now inactive)
+  return (previously_active_slot == 1) ? state->slot_one_profile : state->slot_two_profile;
+}
+
+// This method exists only to enable testing Datadog::Profiling::StackRecorder behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_active_slot(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  return INT2NUM(state->active_slot);
+}
+
+// This method exists only to enable testing Datadog::Profiling::StackRecorder behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_is_slot_one_mutex_locked(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance) { return test_slot_mutex_state(recorder_instance, 1); }
+
+// This method exists only to enable testing Datadog::Profiling::StackRecorder behavior using RSpec.
+// It SHOULD NOT be used for other purposes.
+static VALUE _native_is_slot_two_mutex_locked(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance) { return test_slot_mutex_state(recorder_instance, 2); }
+
+static VALUE test_slot_mutex_state(VALUE recorder_instance, int slot) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  pthread_mutex_t *slot_mutex = (slot == 1) ? &state->slot_one_mutex : &state->slot_two_mutex;
+
+  // Like Heisenberg's uncertainty principle, we can't observe without affecting...
+  int error = pthread_mutex_trylock(slot_mutex);
+
+  if (error == 0) {
+    // Mutex was unlocked
+    ENFORCE_SUCCESS_GVL(pthread_mutex_unlock(slot_mutex));
+    return Qfalse;
+  } else if (error == EBUSY) {
+    // Mutex was locked
+    return Qtrue;
+  } else {
+    ENFORCE_SUCCESS_GVL(error);
+    rb_raise(rb_eRuntimeError, "Failed to raise exception in test_slot_mutex_state; this should never happen");
+  }
+}
+
+// Note that this is using CLOCK_REALTIME (e.g. actual time since unix epoch) and not the CLOCK_MONOTONIC as we use in
+// monotonic_wall_time_now_ns (used in other parts of the codebase)
+static ddog_Timespec time_now(void) {
+  struct timespec current_time;
+
+  if (clock_gettime(CLOCK_REALTIME, &current_time) != 0) ENFORCE_SUCCESS_GVL(errno);
+
+  return (ddog_Timespec) {.seconds = current_time.tv_sec, .nanoseconds = (uint32_t) current_time.tv_nsec};
+}
+
+// After the Ruby VM forks, this method gets called in the child process to clean up any leftover state from the parent.
+//
+// Assumption: This method gets called BEFORE restarting profiling -- e.g. there are no components attempting to
+// trigger samples at the same time.
+static VALUE _native_reset_after_fork(DDTRACE_UNUSED VALUE self, VALUE recorder_instance) {
+  struct stack_recorder_state *state;
+  TypedData_Get_Struct(recorder_instance, struct stack_recorder_state, &stack_recorder_typed_data, state);
+
+  // In case the fork happened halfway through `serializer_flip_active_and_inactive_slots` execution and the
+  // resulting state is inconsistent, we make sure to reset it back to the initial state.
+  initialize_slot_concurrency_control(state);
+
+  ddog_prof_Profile_reset(state->slot_one_profile, /* start_time: */ NULL);
+  ddog_prof_Profile_reset(state->slot_two_profile, /* start_time: */ NULL);
+
+  return Qtrue;
+}
+
+// Assumption 1: This method is called with the GVL being held, because `ddog_prof_Profile_reset` mutates the profile and should
+// not be interrupted part-way through by a VM fork.
+static void serializer_set_start_timestamp_for_next_profile(struct stack_recorder_state *state, ddog_Timespec timestamp) {
+  // Before making this profile active, we reset it so that it uses the correct timestamp for its start
+  ddog_prof_Profile *next_profile = (state->active_slot == 1) ? state->slot_two_profile : state->slot_one_profile;
+
+  if (!ddog_prof_Profile_reset(next_profile, &timestamp)) rb_raise(rb_eRuntimeEr
