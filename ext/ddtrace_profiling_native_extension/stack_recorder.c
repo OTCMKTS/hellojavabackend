@@ -581,4 +581,11 @@ static void serializer_set_start_timestamp_for_next_profile(struct stack_recorde
   // Before making this profile active, we reset it so that it uses the correct timestamp for its start
   ddog_prof_Profile *next_profile = (state->active_slot == 1) ? state->slot_two_profile : state->slot_one_profile;
 
-  if (!ddog_prof_Profile_reset(next_profile, &timestamp)) rb_raise(rb_eRuntimeEr
+  if (!ddog_prof_Profile_reset(next_profile, &timestamp)) rb_raise(rb_eRuntimeError, "Failed to reset profile");
+}
+
+static VALUE _native_record_endpoint(DDTRACE_UNUSED VALUE _self, VALUE recorder_instance, VALUE local_root_span_id, VALUE endpoint) {
+  ENFORCE_TYPE(local_root_span_id, T_FIXNUM);
+  record_endpoint(recorder_instance, NUM2ULL(local_root_span_id), char_slice_from_ruby_string(endpoint));
+  return Qtrue;
+}
