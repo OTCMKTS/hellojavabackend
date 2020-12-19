@@ -1,0 +1,34 @@
+GIT
+  remote: https://github.com/DataDog/simplecov
+  revision: 3bb6b7ee58bf4b1954ca205f50dd44d6f41c57db
+  ref: 3bb6b7ee58bf4b1954ca205f50dd44d6f41c57db
+  specs:
+    simplecov (0.21.2)
+      docile (~> 1.1)
+      simplecov-html (~> 0.11)
+      simplecov_json_formatter (~> 0.1)
+
+PATH
+  remote: ..
+  specs:
+    ddtrace (1.10.1)
+      debase-ruby_core_source (>= 0.10.16, <= 3.2.0)
+      libdatadog (~> 2.0.0.1.0)
+      libddwaf (~> 1.6.2.0.0)
+      msgpack
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    actioncable (6.1.7.1)
+      actionpack (= 6.1.7.1)
+      activesupport (= 6.1.7.1)
+      nio4r (~> 2.0)
+      websocket-driver (>= 0.6.1)
+    actionmailbox (6.1.7.1)
+      actionpack (= 6.1.7.1)
+      activejob (= 6.1.7.1)
+      activerecord (= 6.1.7.1)
+      activestorage (= 6.1.7.1)
+      activesupport (= 6.1.7.1)
+      mail (>=
