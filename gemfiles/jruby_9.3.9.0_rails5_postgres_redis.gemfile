@@ -36,6 +36,7 @@ gem "opentracing", ">= 0.4.1"
 gem "rails", "~> 5.2.1"
 gem "pg", "< 1.0", platform: :ruby
 gem "activerecord-jdbcpostgresql-adapter", platform: :jruby
+gem "redis", "~> 4"
 gem "sprockets", "< 4"
 gem "lograge", "~> 0.11"
 
