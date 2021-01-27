@@ -1,3 +1,4 @@
+
 PATH
   remote: ..
   specs:
@@ -31,10 +32,6 @@ GEM
       activesupport (= 3.2.22.5)
       arel (~> 3.0.2)
       tzinfo (~> 0.3.29)
-    activerecord-mysql-adapter (0.0.1)
-      activerecord (>= 3.2.9)
-      activesupport (>= 3.2.9)
-      mysql (>= 2.9.0)
     activeresource (3.2.22.5)
       activemodel (= 3.2.22.5)
       activesupport (= 3.2.22.5)
@@ -84,10 +81,9 @@ GEM
     mime-types (1.25.1)
     msgpack (1.3.3)
     multi_json (1.15.0)
-    mysql (2.9.1)
-    mysql2 (0.3.21)
     opentracing (0.5.0)
     os (1.1.4)
+    pg (0.15.1)
     pimpmychangelog (0.1.3)
     polyglot (0.3.5)
     power_assert (2.0.3)
@@ -153,7 +149,6 @@ GEM
       multi_json (~> 1.0)
       rack (~> 1.0)
       tilt (~> 1.1, != 1.3.0)
-    sqlite3 (1.3.13)
     test-unit (3.5.7)
       power_assert
     thor (1.2.1)
@@ -174,7 +169,6 @@ PLATFORMS
   x86_64-linux
 
 DEPENDENCIES
-  activerecord-mysql-adapter
   addressable (~> 2.4.0)
   appraisal (~> 2.2.0)
   benchmark-ips (~> 2.8)
@@ -192,9 +186,9 @@ DEPENDENCIES
   json-schema (< 3)
   memory_profiler (= 0.9.12)
   msgpack (~> 1.3.3)
-  mysql2 (= 0.3.21)
   opentracing (>= 0.4.1)
   os (~> 1.1)
+  pg (= 0.15.1)
   pimpmychangelog (>= 0.1.2)
   pry
   pry-nav
@@ -210,7 +204,6 @@ DEPENDENCIES
   rspec_junit_formatter (<= 0.4.1)
   simplecov (~> 0.17)
   simplecov-html (~> 0.10.2)
-  sqlite3 (~> 1.3.5)
   test-unit
   webmock (>= 3.10.0)
   yard (~> 0.9, < 0.9.27)
