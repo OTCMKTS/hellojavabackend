@@ -1,0 +1,88 @@
+GIT
+  remote: https://github.com/DataDog/simplecov
+  revision: 3bb6b7ee58bf4b1954ca205f50dd44d6f41c57db
+  ref: 3bb6b7ee58bf4b1954ca205f50dd44d6f41c57db
+  specs:
+    simplecov (0.21.2)
+      docile (~> 1.1)
+      simplecov-html (~> 0.11)
+      simplecov_json_formatter (~> 0.1)
+
+PATH
+  remote: ..
+  specs:
+    ddtrace (1.10.1)
+      debase-ruby_core_source (>= 0.10.16, <= 3.2.0)
+      libdatadog (~> 2.0.0.1.0)
+      libddwaf (~> 1.6.2.0.0)
+      msgpack
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    actioncable (6.0.6.1)
+      actionpack (= 6.0.6.1)
+      nio4r (~> 2.0)
+      websocket-driver (>= 0.6.1)
+    actionmailbox (6.0.6.1)
+      actionpack (= 6.0.6.1)
+      activejob (= 6.0.6.1)
+      activerecord (= 6.0.6.1)
+      activestorage (= 6.0.6.1)
+      activesupport (= 6.0.6.1)
+      mail (>= 2.7.1)
+    actionmailer (6.0.6.1)
+      actionpack (= 6.0.6.1)
+      actionview (= 6.0.6.1)
+      activejob (= 6.0.6.1)
+      mail (~> 2.5, >= 2.5.4)
+      rails-dom-testing (~> 2.0)
+    actionpack (6.0.6.1)
+      actionview (= 6.0.6.1)
+      activesupport (= 6.0.6.1)
+      rack (~> 2.0, >= 2.0.8)
+      rack-test (>= 0.6.3)
+      rails-dom-testing (~> 2.0)
+      rails-html-sanitizer (~> 1.0, >= 1.2.0)
+    actiontext (6.0.6.1)
+      actionpack (= 6.0.6.1)
+      activerecord (= 6.0.6.1)
+      activestorage (= 6.0.6.1)
+      activesupport (= 6.0.6.1)
+      nokogiri (>= 1.8.5)
+    actionview (6.0.6.1)
+      activesupport (= 6.0.6.1)
+      builder (~> 3.1)
+      erubi (~> 1.4)
+      rails-dom-testing (~> 2.0)
+      rails-html-sanitizer (~> 1.1, >= 1.2.0)
+    activejob (6.0.6.1)
+      activesupport (= 6.0.6.1)
+      globalid (>= 0.3.6)
+    activemodel (6.0.6.1)
+      activesupport (= 6.0.6.1)
+    activerecord (6.0.6.1)
+      activemodel (= 6.0.6.1)
+      activesupport (= 6.0.6.1)
+    activestorage (6.0.6.1)
+      actionpack (= 6.0.6.1)
+      activejob (= 6.0.6.1)
+      activerecord (= 6.0.6.1)
+      marcel (~> 1.0)
+    activesupport (6.0.6.1)
+      concurrent-ruby (~> 1.0, >= 1.0.2)
+      i18n (>= 0.7, < 2)
+      minitest (~> 5.1)
+      tzinfo (~> 1.1)
+      zeitwerk (~> 2.2, >= 2.2.2)
+    addressable (2.4.0)
+    appraisal (2.4.1)
+      bundler
+      rake
+      thor (>= 0.14.0)
+    ast (2.4.2)
+    benchmark-ips (2.11.0)
+    benchmark-memory (0.1.2)
+      memory_profiler (~> 0.9)
+    binding_of_caller (0.8.0)
+      debug_inspecto
