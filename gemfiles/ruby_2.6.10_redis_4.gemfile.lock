@@ -1,3 +1,4 @@
+
 GIT
   remote: https://github.com/DataDog/simplecov
   revision: 3bb6b7ee58bf4b1954ca205f50dd44d6f41c57db
@@ -82,7 +83,7 @@ GEM
     rake-compiler (1.2.1)
       rake
     redcarpet (3.6.0)
-    redis (3.3.5)
+    redis (4.8.1)
     regexp_parser (2.7.0)
     rexml (3.2.5)
     rspec (3.12.0)
@@ -171,7 +172,7 @@ DEPENDENCIES
   rake (>= 10.5)
   rake-compiler (~> 1.1, >= 1.1.1)
   redcarpet (~> 3.4)
-  redis (~> 3)
+  redis (~> 4)
   rspec (~> 3.12)
   rspec-collection_matchers (~> 1.1)
   rspec-wait (~> 0)
