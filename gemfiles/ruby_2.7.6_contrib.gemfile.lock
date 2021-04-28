@@ -1822,3 +1822,52 @@ DEPENDENCIES
   json-schema (< 3)
   lograge (~> 0.11)
   makara
+  memory_profiler (~> 0.9)
+  mongo (>= 2.8.0, < 2.15.0)
+  mysql2 (< 1)
+  opentracing (>= 0.4.1)
+  os (~> 1.1)
+  pg (>= 0.18.4)
+  pimpmychangelog (>= 0.1.2)
+  pry
+  pry-byebug
+  pry-stack_explorer
+  que (>= 1.0.0)
+  racecar (>= 0.3.5)
+  rack
+  rack-contrib
+  rack-test
+  rake (>= 12.3)
+  rake-compiler (~> 1.1, >= 1.1.1)
+  redcarpet (~> 3.4)
+  resque
+  rest-client
+  roda (>= 2.0.0)
+  rspec (>= 3.0.0)
+  rspec-collection_matchers (~> 1.1)
+  rspec-wait (~> 0)
+  rspec_junit_formatter (>= 0.5.1)
+  rspec_n (~> 1.3)
+  rubocop (~> 1.10, < 1.33.0)
+  rubocop-packaging (~> 0.5)
+  rubocop-performance (~> 1.9)
+  rubocop-rspec (~> 2.2)
+  ruby-kafka (>= 0.7.10)
+  ruby-prof (~> 1.4)
+  semantic_logger (~> 4.0)
+  sequel (~> 5.54.0)
+  shoryuken
+  sidekiq (~> 6)
+  simplecov!
+  simplecov-cobertura (~> 2.1.0)
+  sneakers (>= 2.12.0)
+  sqlite3 (~> 1.4.1)
+  stripe
+  sucker_punch
+  typhoeus
+  warning (~> 1)
+  webmock (>= 3.10.0)
+  yard (~> 0.9)
+
+BUNDLED WITH
+   2.3.26
