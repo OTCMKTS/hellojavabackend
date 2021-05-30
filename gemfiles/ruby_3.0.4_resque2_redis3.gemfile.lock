@@ -189,4 +189,27 @@ DEPENDENCIES
   pry
   pry-byebug
   pry-stack_explorer
-  rake (>
+  rake (>= 10.5)
+  rake-compiler (~> 1.1, >= 1.1.1)
+  redcarpet (~> 3.4)
+  redis (< 4.0)
+  resque (>= 2.0)
+  rspec (~> 3.12)
+  rspec-collection_matchers (~> 1.1)
+  rspec-wait (~> 0)
+  rspec_junit_formatter (>= 0.5.1)
+  rspec_n (~> 1.3)
+  rubocop (~> 1.10, < 1.33.0)
+  rubocop-packaging (~> 0.5)
+  rubocop-performance (~> 1.9)
+  rubocop-rspec (~> 2.2)
+  ruby-prof (~> 1.4)
+  simplecov!
+  simplecov-cobertura (~> 2.1.0)
+  warning (~> 1)
+  webmock (>= 3.10.0)
+  webrick (>= 1.7.0)
+  yard (~> 0.9)
+
+BUNDLED WITH
+   2.3.26
