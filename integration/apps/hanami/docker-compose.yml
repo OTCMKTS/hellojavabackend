@@ -72,4 +72,11 @@ services:
     command: -t10 -c10 -d43200s -s /scripts/scenarios/basic/default.lua http://app/books
     depends_on:
       - app
-    
+    environment:
+      - HEALTH_CHECK_URL=http://app/health
+      - HEALTH_CHECK_INTERVAL=1
+      - HEALTH_CHECK_MAX_ATTEMPTS=30
+    volumes:
+      - ../../images/wrk/scripts:/scripts
+volumes:
+  bundle:
