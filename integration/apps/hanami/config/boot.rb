@@ -1,2 +1,2 @@
 require_relative './environment'
-Hana
+Hanami.boot
