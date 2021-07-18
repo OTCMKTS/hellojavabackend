@@ -57,4 +57,42 @@ class CustomError < StandardError
   end
 end
 
-class CacheM
+class CacheMiddleware
+  def initialize(app)
+    @app = app
+  end
+
+  def call(env)
+    request_id = env['action_dispatch.request_id']
+
+    # NOTE: Disabled for now, suspected to cause memory growth.
+    # Fetch from cache
+    # Rails.cache.fetch(request_id) { request_id }
+
+    @app.call(env)
+  end
+end
+
+module Acme
+  class Application < Rails::Application
+    # Initialize configuration defaults for originally generated Rails version.
+    config.load_defaults 5.2
+
+    # Settings in config/environments/* take precedence over those specified here.
+    # Application configuration can go into files in config/initializers
+    # -- all .rb files in that directory are automatically loaded after loading
+    # the framework and any gems in your application.
+    # config.middleware.use TraceMiddleware
+    # config.middleware.use ShortCircuitMiddleware
+    # config.middleware.use ErrorMiddleware
+    config.middleware.use CacheMiddleware
+
+    # Only loads a smaller set of middleware suitable for API only apps.
+    # Middleware like session, flash, cookies can be added back manually.
+    # Skip views, helpers and assets when generating a new resource.
+    config.api_only = true
+
+    config.cache_store = :redis_cache_store, { url: ENV['REDIS_URL'] }
+    config.action_controller.perform_caching = true
+  end
+end
