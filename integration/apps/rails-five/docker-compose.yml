@@ -1,0 +1,13 @@
+version: '3.4'
+services:
+  app:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: "datadog/dd-apm-demo:rb-${RUBY_VERSION}"
+    depends_on:
+      - ddagent
+      - mysql
+      - redis
+    environment:
+      - BUNDLE_GEMFILE=/app/G

@@ -2,4 +2,4 @@
 
 require_relative 'config/environment'
 
-run Rails.applicat
+run Rails.application
