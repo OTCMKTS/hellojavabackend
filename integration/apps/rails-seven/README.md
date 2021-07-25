@@ -116,4 +116,39 @@ Set `DD_DEMO_ENV_FEATURES` to a comma-delimited list of any of the following val
 
 e.g. `DD_DEMO_ENV_FEATURES=tracing,profiling`
 
-#####
+##### Routes
+
+```sh
+# Health check
+curl -v localhost/health
+
+# Basic test scenarios
+curl -v localhost/basic/fibonacci
+curl -v -XPOST localhost/basic/everything
+
+# Job test scenarios
+curl -v -XPOST localhost/jobs
+```
+
+### Load tester
+
+Docker configuration automatically creates and runs [Wrk](https://github.com/wg/wrk) load testing containers. By default it runs the `basic/everything` scenario described in the `wrk` image to give a baseload.
+
+You can modify the `loadtester_a` container in `docker-compose.yml` to change the load type or scenario run. Set the container's `command` to any set of arguments `wrk` accepts.
+
+You can also define your own custom scenario by creating a LUA file, mounting it into the container, and passing it as an argument via `command`.
+
+### Running integration tests
+
+You can run integration tests using the following and substituting for the Ruby major and minor version (e.g. `2.7`)
+
+```sh
+./bin/build-images -v <RUBY_VERSION>
+./bin/ci -v <RUBY_VERSION>
+```
+
+Or inside a running container:
+
+```sh
+./bin/rspec
+```
