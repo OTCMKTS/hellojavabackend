@@ -16,4 +16,13 @@ development:
 test:
   <<: *default
   adapter: <%= mysql.scheme %>
-  d
+  database: acme_test
+  host: <%= mysql.host %>
+  username,: <%= mysql.user %>
+
+production:
+  <<: *default
+  adapter: <%= mysql.scheme %>
+  database: acme_production
+  host: <%= mysql.host %>
+  username,: <%= mysql.user %>
