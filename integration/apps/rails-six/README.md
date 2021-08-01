@@ -67,4 +67,88 @@ Update the `app` --> `environment` section in `docker-compose.yml`:
 ```
 version: '3.4'
 services:
-  ap
+  app:
+    environment:
+      # Add the following env var (path to `ddtrace` gem dir in the Docker container)
+      - DD_DEMO_ENV_GEM_LOCAL_DDTRACE=/vendor/dd-trace-rb
+```
+
+#### Running a specific version of `ddtrace`
+
+Update the `app` --> `environment` section in `docker-compose.yml`:
+
+```
+version: '3.4'
+services:
+  app:
+    environment:
+      # Comment out any GEM_LOCAL env var.
+      # Otherwise local source code will override your reference.
+      # - DD_DEMO_ENV_GEM_LOCAL_DDTRACE=/vendor/dd-trace-rb
+      # Set these to the appropriate Git source and commit SHA:
+      - DD_DEMO_ENV_GEM_GIT_DDTRACE=https://github.com/DataDog/dd-trace-rb.git
+      - DD_DEMO_ENV_GEM_REF_DDTRACE=f233336994315bfa04dac581387a8152bab8b85a
+```
+
+Then delete the old containers with `docker-compose down` and start the application again.
+
+##### Processes
+
+Within the container, run `bin/dd-demo <process>` where `<process>` is one of the following values:
+
+ - `puma`: Puma web server
+ - `unicorn`: Unicorn web server
+ - `console`: Rails console
+ - `irb`: IRB session
+
+ Alternatively, set `DD_DEMO_ENV_PROCESS` to run a particular process by default when `bin/dd-demo` is run.
+
+##### Features
+
+Set `DD_DEMO_ENV_FEATURES` to a comma-delimited list of any of the following values to activate the feature:
+
+ - `tracing`: Tracing instrumentation
+ - `profiling`: Profiling (NOTE: Must also set `DD_PROFILING_ENABLED` to match.)
+ - `debug`: Enable diagnostic debug mode
+ - `analytics`: Enable trace analytics
+ - `runtime_metrics`: Enable runtime metrics
+ - `pprof_to_file`: Dump profiling pprof to file instead of agent.
+
+e.g. `DD_DEMO_ENV_FEATURES=tracing,profiling`
+
+##### Routes
+
+```sh
+# Health check
+curl -v localhost/health
+
+# Basic test scenarios
+curl -v localhost/basic/fibonacci
+curl -v -XPOST localhost/basic/everything
+
+# Job test scenarios
+curl -v -XPOST localhost/jobs
+```
+
+### Load tester
+
+Docker configuration automatically creates and runs [Wrk](https://github.com/wg/wrk) load testing containers. By default it runs the `basic/everything` scenario described in the `wrk` image to give a baseload.
+
+You can modify the `loadtester_a` container in `docker-compose.yml` to change the load type or scenario run. Set the container's `command` to any set of arguments `wrk` accepts.
+
+You can also define your own custom scenario by creating a LUA file, mounting it into the container, and passing it as an argument via `command`.
+
+### Running integration tests
+
+You can run integration tests using the following and substituting for the Ruby major and minor version (e.g. `2.7`)
+
+```sh
+./bin/build-images -v <RUBY_VERSION>
+./bin/ci -v <RUBY_VERSION>
+```
+
+Or inside a running container:
+
+```sh
+./bin/rspec
+```
