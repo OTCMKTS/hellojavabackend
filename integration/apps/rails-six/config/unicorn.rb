@@ -25,4 +25,5 @@ after_fork do |server, worker|
   defined?(ActiveRecord::Base) and
     ActiveRecord::Base.establish_connection
 
-  Datadog::DemoEnv.print_env('Unicorn worker 
+  Datadog::DemoEnv.print_env('Unicorn worker environment')
+end
