@@ -72,4 +72,21 @@ Set `DD_DEMO_ENV_FEATURES` to a comma-delimited list of any of the following val
  - `debug`: Enable diagnostic debug mode
  - `analytics`: Enable trace analytics
  - `runtime_metrics`: Enable runtime metrics
- - `pprof_to_file`: Dump profili
+ - `pprof_to_file`: Dump profiling pprof to file instead of agent.
+
+e.g. `DD_DEMO_ENV_FEATURES=tracing,profiling`
+
+### Running integration tests
+
+You can run integration tests using the following and substituting for the Ruby major and minor version (e.g. `2.7`)
+
+```sh
+./script/build-images -v <RUBY_VERSION>
+./script/ci -v <RUBY_VERSION>
+```
+
+Or inside a running container:
+
+```sh
+./bin/test
+```
