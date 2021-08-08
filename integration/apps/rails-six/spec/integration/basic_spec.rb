@@ -22,3 +22,17 @@ RSpec.describe 'Basic scenarios' do
         profiler_threads: contain_exactly('Datadog::Profiling::Collectors::OldStack', 'Datadog::Profiling::Scheduler')
       )
     end
+
+    it 'should be sending telemetry events' do
+      expect(json_result).to include(
+        telemetry_enabled: true,
+        telemetry_client_enabled: true,
+        telemetry_worker_enabled: true
+      )
+    end
+
+    it 'webserver sanity checking' do
+      puts "      Webserver: #{json_result.fetch(:webserver_process)}"
+    end
+  end
+end
