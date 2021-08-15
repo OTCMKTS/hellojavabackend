@@ -41,3 +41,42 @@ services:
   ddagent:
     image: datadog/dd-apm-demo:agent
     environment:
+      - DD_APM_ENABLED=true
+      - DD_PROCESS_AGENT_ENABLED=false
+      - DD_BIND_HOST=0.0.0.0
+      - DD_API_KEY
+      - "DD_HOSTNAME=${DD_HOSTNAME}"
+      - LOG_LEVEL=DEBUG
+      - DD_LOGS_STDOUT=yes
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true
+    expose:
+      - "8125/udp"
+      - "8126"
+    volumes:
+      - ../../images/agent/agent.yaml:/etc/datadog-agent/datadog.yaml
+      # For monitoring performance of containers (e.g. CPU, Memory, etc...)
+      # - type: bind
+      #   source: ../../images/agent/agent.yaml
+      #   target: /etc/datadog-agent/datadog.yaml
+      # - type: bind
+      #   source: /var/run/docker.sock
+      #   target: /var/run/docker.sock:ro
+      # - type: bind
+      #   source: /proc/
+      #   target: /host/proc/:ro
+      # - type: bind
+      #   source: /sys/fs/cgroup/
+      #   target: /host/sys/fs/cgroup:ro
+  load-tester:
+    image: datadog/dd-apm-demo:wrk
+    command: -t10 -c10 -d43200s -s /scripts/scenarios/basic/default.lua http://app/basic/default
+    depends_on:
+      - app
+    environment:
+      - HEALTH_CHECK_URL=http://app/health
+      - HEALTH_CHECK_INTERVAL=1
+      - HEALTH_CHECK_MAX_ATTEMPTS=60
+    volumes:
+      - ../../images/wrk/scripts:/scripts
+volumes:
+  bundle:
