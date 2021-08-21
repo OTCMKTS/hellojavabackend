@@ -1,4 +1,5 @@
-FROM ruby:2.3
+
+FROM ruby:2.5
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -47,22 +48,6 @@ RUN mkdir -p "$GEM_HOME" && chmod -R 777 "$GEM_HOME"
 RUN gem update --system 3.3.26
 RUN gem install bundler
 ENV BUNDLE_SILENCE_ROOT_WARNING 1
-
-# NOTE:
-# Ruby 2.3 base image sets BUNDLE_PATH which causes Bundler (>= 2.0) to install to:
-#   /usr/local/bundle/ruby/2.3.0/bin
-# Instead of the desired:
-#   /usr/local/bundle/bin
-#
-# Because BUNDLE_PATH cannot be removed from ENV (Docker does not permit this),
-# we must work around this by adding the bin directory to the PATH.
-#
-# See:
-#  https://github.com/docker-library/ruby/issues/297
-#  https://github.com/docker-library/ruby/pull/306
-#  https://github.com/rubygems/bundler/issues/7494
-ENV GEM_PATH=$GEM_HOME:$GEM_HOME/ruby/$RUBY_MAJOR.0
-ENV PATH=$GEM_HOME/bin:$GEM_HOME/ruby/$RUBY_MAJOR.0/bin:$PATH
 
 # Setup demo environment includes
 COPY ./include /vendor/dd-demo
