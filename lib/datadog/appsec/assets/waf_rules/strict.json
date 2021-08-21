@@ -1,0 +1,71 @@
+
+{
+  "version": "2.2",
+  "metadata": {
+    "rules_version": "1.5.2"
+  },
+  "rules": [
+    {
+      "id": "crs-913-100",
+      "name": "Found User-Agent associated with security scanner",
+      "tags": {
+        "type": "security_scanner",
+        "crs_id": "913100",
+        "category": "attack_attempt"
+      },
+      "conditions": [
+        {
+          "parameters": {
+            "inputs": [
+              {
+                "address": "server.request.headers.no_cookies",
+                "key_path": [
+                  "user-agent"
+                ]
+              }
+            ],
+            "list": [
+              "",
+              "(hydra)",
+              ".nasl",
+              "absinthe",
+              "advanced email extractor",
+              "arachni/",
+              "autogetcontent",
+              "bilbo",
+              "bfac",
+              "brutus",
+              "brutus/aet",
+              "bsqlbf",
+              "cgichk",
+              "cisco-torch",
+              "commix",
+              "core-project/1.0",
+              "crimscanner/",
+              "datacha0s",
+              "detectify",
+              "dirbuster",
+              "domino hunter",
+              "dotdotpwn",
+              "email extractor",
+              "fhscan core 1.",
+              "floodgate",
+              "fuzz faster u fool",
+              "f-secure radar",
+              "get-minimal",
+              "gobuster",
+              "gootkit auto-rooter scanner",
+              "grabber",
+              "grendel-scan",
+              "havij",
+              "inspath",
+              "internet ninja",
+              "jaascois",
+              "jorgee",
+              "masscan",
+              "metis",
+              "morfeus fucking scanner",
+              "mysqloit",
+              "n-stealth",
+              "nessus",
+              "netsparker",
