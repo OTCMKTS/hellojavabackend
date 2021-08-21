@@ -1,4 +1,5 @@
-FROM ruby:2.6
+
+FROM ruby:3.2
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -43,7 +44,7 @@ ENV LANGUAGE en_US:en
 RUN gem update --system 3.4.1
 RUN mkdir -p "$GEM_HOME" && chmod -R 777 "$GEM_HOME"
 
-# Install RubyGems
+# Upgrade RubyGems and Bundler
 RUN gem update --system 3.4.1
 RUN gem install bundler
 ENV BUNDLE_SILENCE_ROOT_WARNING 1
