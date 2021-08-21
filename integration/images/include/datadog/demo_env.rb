@@ -58,4 +58,48 @@ module Datadog
       puts "Process:         #{process}"
       puts "Features:        #{features}"
       puts "Rails env:       #{ENV['RAILS_ENV']}" if ENV['RAILS_ENV']
-   
+      puts "PID:             #{Process.pid}"
+      if (ddtrace = Gem.loaded_specs['ddtrace'])
+        puts "Runtime ID:      #{Datadog::Core::Environment::Identity.id}" if defined?(Datadog::Core::Environment::Identity)
+        puts "ddtrace version: #{ddtrace.version}"
+        puts "ddtrace path:    #{ddtrace.full_gem_path}"
+        if (git_spec = git_gem('ddtrace'))
+          puts "ddtrace git:     #{git_spec[:git]}"
+          puts "ddtrace ref:     #{git_spec[:ref]}"
+        end
+      end
+      puts "\n"
+    end
+
+    def profiler_file_transport(dump_path = "/data/profile-pid-#{Process.pid}.pprof")
+      Datadog::Profiling::Transport::IO.default(
+        write: lambda do |_out, data|
+          result = nil
+          puts "Writing pprof #{dump_path}..."
+          File.open(dump_path, 'w') { |f| result = f.write(data) }
+          puts "Pprof #{dump_path} written!"
+          result
+        end
+      )
+    end
+
+    def start_mem_dump!
+      require 'objspace'
+      ObjectSpace.trace_object_allocations_start
+    end
+
+    def finish_mem_dump!(dump_path = "/data/mem-pid-#{Process.pid}.dump")
+      File.delete(dump_path) if File.exist?(dump_path)
+      File.open(dump_path, 'w') do |io|
+        ObjectSpace.dump_all(output: io)
+      end
+    end
+
+    def mem_dump!(dump_path = "/data/mem-pid-#{Process.pid}.dump")
+      start_mem_dump!
+      result = yield
+      finish_mem_dump!
+      result
+    end
+  end
+end
