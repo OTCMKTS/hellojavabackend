@@ -67,4 +67,22 @@ module Datadog
           found = @instruments.find { |e| e.name == key }
 
           found.options if found
-  
+        end
+      end
+
+      # class-level methods for Configuration
+      module ClassMethods
+        def configure
+          dsl = DSL.new
+          yield dsl
+          settings.merge(dsl)
+          settings
+        end
+
+        def settings
+          @settings ||= Settings.new
+        end
+      end
+    end
+  end
+end
