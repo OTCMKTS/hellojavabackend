@@ -5,17 +5,16 @@ module Datadog
     module Contrib
       module Rack
         module Reactive
-          # Dispatch data from a Rack request to the WAF context
-          module RequestBody
+          # Dispatch data from a Rack response to the WAF context
+          module Response
             ADDRESSES = [
-              'request.body',
+              'response.status',
             ].freeze
             private_constant :ADDRESSES
 
-            def self.publish(op, gateway_request)
+            def self.publish(op, gateway_response)
               catch(:block) do
-                # params have been parsed from the request body
-                op.publish('request.body', gateway_request.form_hash)
+                op.publish('response.status', gateway_response.status)
 
                 nil
               end
@@ -24,10 +23,11 @@ module Datadog
             def self.subscribe(op, waf_context)
               op.subscribe(*ADDRESSES) do |*values|
                 Datadog.logger.debug { "reacted to #{ADDRESSES.inspect}: #{values.inspect}" }
-                body = values[0]
+
+                response_status = values[0]
 
                 waf_args = {
-                  'server.request.body' => body,
+                  'server.response.status' => response_status.to_s,
                 }
 
                 waf_timeout = Datadog::AppSec.settings.waf_timeout
