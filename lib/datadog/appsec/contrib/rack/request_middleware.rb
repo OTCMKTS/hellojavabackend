@@ -126,4 +126,28 @@ module Datadog
                 trace.set_tag('_dd.appsec.event_rules.errors', JSON.dump(processor.ruleset_info[:errors]))
                 trace.set_tag('_dd.appsec.event_rules.addresses', JSON.dump(processor.addresses))
 
-                # En
+                # Ensure these tags reach the backend
+                trace.keep!
+                trace.set_tag(
+                  Datadog::Tracing::Metadata::Ext::Distributed::TAG_DECISION_MAKER,
+                  Datadog::Tracing::Sampling::Ext::Decision::ASM
+                )
+              end
+            end
+          end
+
+          def add_waf_runtime_tags(trace, context)
+            return unless trace
+            return unless context
+
+            trace.set_tag('_dd.appsec.waf.timeouts', context.timeouts)
+
+            # these tags expect time in us
+            trace.set_tag('_dd.appsec.waf.duration', context.time_ns / 1000.0)
+            trace.set_tag('_dd.appsec.waf.duration_ext', context.time_ext_ns / 1000.0)
+          end
+        end
+      end
+    end
+  end
+end
