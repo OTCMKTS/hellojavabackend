@@ -28,4 +28,7 @@ module Datadog
             end
           end
         end
-      e
+      end
+    end
+  end
+end
