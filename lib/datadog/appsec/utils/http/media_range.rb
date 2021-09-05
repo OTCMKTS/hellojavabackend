@@ -181,4 +181,19 @@ module Datadog
             return wildcard?(:type) || wildcard?(:subtype) if field.nil?
 
             instance_variable_get(:"@#{field}") == WILDCARD
-          
+          end
+
+          def to_s
+            s = "#{@type}/#{@subtype}"
+
+            s << ';' << @parameters.map { |k, v| "#{k}=#{v}" }.join(';') if @parameters.count > 0
+            s << ";q=#{@quality}" if @quality < 1.0
+            s << ';' << @accept_ext.map { |k, v| "#{k}=#{v}" }.join(';') if @accept_ext.count > 0
+
+            s
+          end
+        end
+      end
+    end
+  end
+end
