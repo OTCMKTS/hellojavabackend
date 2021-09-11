@@ -319,3 +319,222 @@ module Datadog
             TAG_PIPELINE_NUMBER => env['BUILD_NUMBER'],
             TAG_PIPELINE_URL => env['BUILD_URL'],
             TAG_PROVIDER_NAME => 'jenkins',
+            TAG_WORKSPACE_PATH => env['WORKSPACE'],
+            TAG_CI_ENV_VARS => {
+              'DD_CUSTOM_TRACE_ID' => env['DD_CUSTOM_TRACE_ID']
+            }.to_json
+          }
+        end
+
+        def extract_teamcity(env)
+          {
+            TAG_PROVIDER_NAME => 'teamcity',
+            TAG_JOB_NAME => env['TEAMCITY_BUILDCONF_NAME'],
+            TAG_JOB_URL => env['BUILD_URL'],
+          }
+        end
+
+        def extract_travis(env)
+          {
+            Core::Git::Ext::TAG_BRANCH => (env['TRAVIS_PULL_REQUEST_BRANCH'] || env['TRAVIS_BRANCH']),
+            Core::Git::Ext::TAG_COMMIT_SHA => env['TRAVIS_COMMIT'],
+            Core::Git::Ext::TAG_REPOSITORY_URL => "https://github.com/#{env['TRAVIS_REPO_SLUG']}.git",
+            Core::Git::Ext::TAG_TAG => env['TRAVIS_TAG'],
+            TAG_JOB_URL => env['TRAVIS_JOB_WEB_URL'],
+            TAG_PIPELINE_ID => env['TRAVIS_BUILD_ID'],
+            TAG_PIPELINE_NAME => env['TRAVIS_REPO_SLUG'],
+            TAG_PIPELINE_NUMBER => env['TRAVIS_BUILD_NUMBER'],
+            TAG_PIPELINE_URL => env['TRAVIS_BUILD_WEB_URL'],
+            TAG_PROVIDER_NAME => 'travisci',
+            TAG_WORKSPACE_PATH => env['TRAVIS_BUILD_DIR'],
+            Core::Git::Ext::TAG_COMMIT_MESSAGE => env['TRAVIS_COMMIT_MESSAGE']
+          }
+        end
+
+        def extract_bitrise(env)
+          commit = (
+            env['BITRISE_GIT_COMMIT'] || env['GIT_CLONE_COMMIT_HASH']
+          )
+          branch = (
+            env['BITRISEIO_GIT_BRANCH_DEST'] || env['BITRISE_GIT_BRANCH']
+          )
+          commiter_email = (
+            env['GIT_CLONE_COMMIT_COMMITER_EMAIL'] || env['GIT_CLONE_COMMIT_COMMITER_NAME']
+          )
+
+          {
+            TAG_PROVIDER_NAME => 'bitrise',
+            TAG_PIPELINE_ID => env['BITRISE_BUILD_SLUG'],
+            TAG_PIPELINE_NAME => env['BITRISE_TRIGGERED_WORKFLOW_ID'],
+            TAG_PIPELINE_NUMBER => env['BITRISE_BUILD_NUMBER'],
+            TAG_PIPELINE_URL => env['BITRISE_BUILD_URL'],
+            TAG_WORKSPACE_PATH => env['BITRISE_SOURCE_DIR'],
+            Core::Git::Ext::TAG_REPOSITORY_URL => env['GIT_REPOSITORY_URL'],
+            Core::Git::Ext::TAG_COMMIT_SHA => commit,
+            Core::Git::Ext::TAG_BRANCH => branch,
+            Core::Git::Ext::TAG_TAG => env['BITRISE_GIT_TAG'],
+            Core::Git::Ext::TAG_COMMIT_MESSAGE => env['BITRISE_GIT_MESSAGE'],
+            Core::Git::Ext::TAG_COMMIT_AUTHOR_NAME => env['GIT_CLONE_COMMIT_AUTHOR_NAME'],
+            Core::Git::Ext::TAG_COMMIT_AUTHOR_EMAIL => env['GIT_CLONE_COMMIT_AUTHOR_EMAIL'],
+            Core::Git::Ext::TAG_COMMIT_COMMITTER_NAME => env['GIT_CLONE_COMMIT_COMMITER_NAME'],
+            Core::Git::Ext::TAG_COMMIT_COMMITTER_EMAIL => commiter_email
+          }
+        end
+
+        def extract_user_defined_git(env)
+          {
+            Core::Git::Ext::TAG_REPOSITORY_URL => env[Core::Git::Ext::ENV_REPOSITORY_URL],
+            Core::Git::Ext::TAG_COMMIT_SHA => env[Core::Git::Ext::ENV_COMMIT_SHA],
+            Core::Git::Ext::TAG_BRANCH => env[Core::Git::Ext::ENV_BRANCH],
+            Core::Git::Ext::TAG_TAG => env[Core::Git::Ext::ENV_TAG],
+            Core::Git::Ext::TAG_COMMIT_MESSAGE => env[Core::Git::Ext::ENV_COMMIT_MESSAGE],
+            Core::Git::Ext::TAG_COMMIT_AUTHOR_NAME => env[Core::Git::Ext::ENV_COMMIT_AUTHOR_NAME],
+            Core::Git::Ext::TAG_COMMIT_AUTHOR_EMAIL => env[Core::Git::Ext::ENV_COMMIT_AUTHOR_EMAIL],
+            Core::Git::Ext::TAG_COMMIT_AUTHOR_DATE => env[Core::Git::Ext::ENV_COMMIT_AUTHOR_DATE],
+            Core::Git::Ext::TAG_COMMIT_COMMITTER_NAME => env[Core::Git::Ext::ENV_COMMIT_COMMITTER_NAME],
+            Core::Git::Ext::TAG_COMMIT_COMMITTER_EMAIL => env[Core::Git::Ext::ENV_COMMIT_COMMITTER_EMAIL],
+            Core::Git::Ext::TAG_COMMIT_COMMITTER_DATE => env[Core::Git::Ext::ENV_COMMIT_COMMITTER_DATE]
+          }.reject { |_, v| v.nil? || v.strip.empty? }
+        end
+
+        def git_commit_users
+          # Get committer and author information in one command.
+          output = exec_git_command("git show -s --format='%an\t%ae\t%at\t%cn\t%ce\t%ct'")
+          return unless output
+
+          fields = output.split("\t").each(&:strip!)
+
+          {
+            author_name: fields[0],
+            author_email: fields[1],
+            # Because we can't get a reliable UTC time from all recent versions of git
+            # We have to rely on converting the date to UTC ourselves.
+            author_date: Time.at(fields[2].to_i).utc.to_datetime.iso8601,
+            committer_name: fields[3],
+            committer_email: fields[4],
+            # Because we can't get a reliable UTC time from all recent versions of git
+            # We have to rely on converting the date to UTC ourselves.
+            committer_date: Time.at(fields[5].to_i).utc.to_datetime.iso8601
+          }
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git commit users: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_repository_url
+          exec_git_command('git ls-remote --get-url')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git repository url: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_commit_message
+          exec_git_command('git show -s --format=%s')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git commit message: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_branch
+          exec_git_command('git rev-parse --abbrev-ref HEAD')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git branch: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_commit_sha
+          exec_git_command('git rev-parse HEAD')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git commit SHA: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_tag
+          exec_git_command('git tag --points-at HEAD')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git tag: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def git_base_directory
+          exec_git_command('git rev-parse --show-toplevel')
+        rescue => e
+          Datadog.logger.debug(
+            "Unable to read git base directory: #{e.class.name} #{e.message} at #{Array(e.backtrace).first}"
+          )
+          nil
+        end
+
+        def exec_git_command(cmd)
+          out, status = Open3.capture2e(cmd)
+
+          raise "Failed to run git command #{cmd}: #{out}" unless status.success?
+
+          out.strip! # There's always a "\n" at the end of the command output
+
+          return nil if out.empty?
+
+          out
+        end
+
+        def extract_local_git
+          env = {
+            TAG_WORKSPACE_PATH => git_base_directory,
+            Core::Git::Ext::TAG_REPOSITORY_URL => git_repository_url,
+            Core::Git::Ext::TAG_COMMIT_SHA => git_commit_sha,
+            Core::Git::Ext::TAG_BRANCH => git_branch,
+            Core::Git::Ext::TAG_TAG => git_tag,
+            Core::Git::Ext::TAG_COMMIT_MESSAGE => git_commit_message
+          }
+
+          if (commit_users = git_commit_users)
+            env.merge!(
+              Core::Git::Ext::TAG_COMMIT_AUTHOR_NAME => commit_users[:author_name],
+              Core::Git::Ext::TAG_COMMIT_AUTHOR_EMAIL => commit_users[:author_email],
+              Core::Git::Ext::TAG_COMMIT_AUTHOR_DATE => commit_users[:author_date],
+              Core::Git::Ext::TAG_COMMIT_COMMITTER_NAME => commit_users[:committer_name],
+              Core::Git::Ext::TAG_COMMIT_COMMITTER_EMAIL => commit_users[:committer_email],
+              Core::Git::Ext::TAG_COMMIT_COMMITTER_DATE => commit_users[:committer_date]
+            )
+          end
+
+          env
+        end
+
+        def branch_or_tag(branch_or_tag)
+          branch = tag = nil
+          if branch_or_tag && branch_or_tag.include?('tags/')
+            tag = branch_or_tag
+          else
+            branch = branch_or_tag
+          end
+
+          [branch, tag]
+        end
+
+        def extract_name_email(name_and_email)
+          if name_and_email.include?('<') && (match = /^([^<]*)<([^>]*)>$/.match(name_and_email))
+            name = match[1]
+            name = name.strip if name
+            email = match[2]
+            return [name, email] if name && email
+          end
+
+          [nil, name_and_email]
+        end
+      end
+    end
+  end
+end
