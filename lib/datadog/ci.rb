@@ -11,4 +11,8 @@ end
 
 # Integrations
 require_relative 'ci/contrib/cucumber/integration'
-require_r
+require_relative 'ci/contrib/rspec/integration'
+
+# Extensions
+require_relative 'ci/extensions'
+Datadog::CI::Extensions.activate!
