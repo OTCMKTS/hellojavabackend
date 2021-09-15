@@ -60,4 +60,73 @@ module Datadog
         # Draining is still allowed.
         def close
           @closed = true
-  
+        end
+
+        def closed?
+          @closed
+        end
+
+        protected
+
+        # Segment items into two segments: underflow and overflow.
+        # Underflow are items that will fit into buffer.
+        # Overflow are items that will exceed capacity, after underflow is added.
+        # Returns each array, and nil if there is no underflow/overflow.
+        def overflow_segments(items)
+          underflow = nil
+          overflow = nil
+
+          overflow_size = @max_size > 0 ? (@items.length + items.length) - @max_size : 0
+
+          if overflow_size > 0
+            # Items will overflow
+            if overflow_size < items.length
+              # Partial overflow
+              underflow_end_index = items.length - overflow_size - 1
+              underflow = items[0..underflow_end_index]
+              overflow = items[(underflow_end_index + 1)..-1]
+            else
+              # Total overflow
+              overflow = items
+            end
+          else
+            # Items do not exceed capacity.
+            underflow = items
+          end
+
+          [underflow, overflow]
+        end
+
+        def full?
+          @max_size > 0 && @items.length >= @max_size
+        end
+
+        def add_all!(items)
+          @items.concat(items)
+        end
+
+        def add!(item)
+          @items << item
+        end
+
+        def replace!(item)
+          # Choose random item to be replaced
+          replace_index = rand(@items.length)
+
+          # Replace random item
+          discarded_item = @items[replace_index]
+          @items[replace_index] = item
+
+          # Return discarded item
+          discarded_item
+        end
+
+        def drain!
+          items = @items
+          @items = []
+          items
+        end
+      end
+    end
+  end
+end
