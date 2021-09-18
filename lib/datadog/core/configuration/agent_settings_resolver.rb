@@ -221,3 +221,126 @@ module Datadog
           unparsed_url_from_env = ENV[Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_URL]
 
           @parsed_url =
+            if unparsed_url_from_env
+              parsed = URI.parse(unparsed_url_from_env)
+
+              if %w[http https].include?(parsed.scheme)
+                parsed
+              else
+                # rubocop:disable Layout/LineLength
+                log_warning(
+                  "Invalid URI scheme '#{parsed.scheme}' for #{Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_URL} " \
+                  "environment variable ('#{unparsed_url_from_env}'). " \
+                  "Ignoring the contents of #{Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_URL}."
+                )
+                # rubocop:enable Layout/LineLength
+
+                nil
+              end
+            end
+        end
+
+        def pick_from(*configurations_in_priority_order)
+          detected_configurations_in_priority_order = configurations_in_priority_order.select(&:value?)
+
+          if detected_configurations_in_priority_order.any?
+            warn_if_configuration_mismatch(detected_configurations_in_priority_order)
+
+            # The configurations are listed in priority, so we only need to look at the first; if there's more than
+            # one, we emit a warning above
+            detected_configurations_in_priority_order.first.value
+          end
+        end
+
+        def warn_if_configuration_mismatch(detected_configurations_in_priority_order)
+          return unless detected_configurations_in_priority_order.map(&:value).uniq.size > 1
+
+          log_warning(
+            'Configuration mismatch: values differ between ' \
+            "#{detected_configurations_in_priority_order
+              .map { |config| "#{config.friendly_name} (#{config.value.inspect})" }.join(' and ')}" \
+            ". Using #{detected_configurations_in_priority_order.first.value.inspect}."
+          )
+        end
+
+        def log_warning(message)
+          logger.warn(message) if logger
+        end
+
+        # The settings.tracing.transport_options allows users to have full control over the settings used to
+        # communicate with the agent. In the general case, we can't extract the configuration from this proc, but
+        # in the specific case of the http and unix socket adapters we can, and we use this method together with the
+        # `TransportOptionsResolver` to call the proc and extract its information.
+        def transport_options
+          return @transport_options if defined?(@transport_options)
+
+          transport_options_proc = settings.tracing.transport_options
+
+          @transport_options = TransportOptions.new
+
+          if transport_options_proc.is_a?(Proc)
+            begin
+              transport_options_proc.call(TransportOptionsResolver.new(@transport_options))
+            rescue NoMethodError => e
+              if logger
+                logger.debug do
+                  'Could not extract configuration from transport_options proc. ' \
+                  "Cause: #{e.class.name} #{e.message} Source: #{Array(e.backtrace).first}"
+                end
+              end
+
+              # Reset the object; we shouldn't return the same one we passed into the proc as it may have
+              # some partial configuration and we want all-or-nothing.
+              @transport_options = TransportOptions.new
+            end
+          end
+
+          @transport_options.freeze
+        end
+
+        # Represents a given configuration value and where we got it from
+        class DetectedConfiguration
+          attr_reader :friendly_name, :value
+
+          def initialize(friendly_name:, value:)
+            @friendly_name = friendly_name
+            @value = value
+            freeze
+          end
+
+          def value?
+            !value.nil?
+          end
+        end
+        private_constant :DetectedConfiguration
+
+        # Used to contain information extracted from the transport_options proc (see #transport_options above)
+        TransportOptions = Struct.new(:adapter, :hostname, :port, :timeout_seconds, :ssl, :uds_path)
+        private_constant :TransportOptions
+
+        # Used to extract information from the transport_options proc (see #transport_options above)
+        class TransportOptionsResolver
+          def initialize(transport_options)
+            @transport_options = transport_options
+          end
+
+          def adapter(kind_or_custom_adapter, *args, **kwargs)
+            case kind_or_custom_adapter
+            when Datadog::Transport::Ext::HTTP::ADAPTER
+              @transport_options.adapter = Datadog::Transport::Ext::HTTP::ADAPTER
+              @transport_options.hostname = args[0] || kwargs[:hostname]
+              @transport_options.port = args[1] || kwargs[:port]
+              @transport_options.timeout_seconds = kwargs[:timeout]
+              @transport_options.ssl = kwargs[:ssl]
+            when Datadog::Transport::Ext::UnixSocket::ADAPTER
+              @transport_options.adapter = Datadog::Transport::Ext::UnixSocket::ADAPTER
+              @transport_options.uds_path = args[0] || kwargs[:uds_path]
+            end
+
+            nil
+          end
+        end
+      end
+    end
+  end
+end
