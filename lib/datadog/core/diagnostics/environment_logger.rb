@@ -174,4 +174,113 @@ module Datadog
           hash_serializer(tags)
         end
 
-        # @return 
+        # @return [Boolean, nil] runtime metrics enabled in configuration
+        def runtime_metrics_enabled
+          Datadog.configuration.runtime_metrics.enabled
+        end
+
+        # Concatenated list of integrations activated, with their gem version.
+        # Example: "rails@6.0.3,rack@2.2.3"
+        #
+        # @return [String, nil]
+        def integrations_loaded
+          integrations = instrumented_integrations
+          return if integrations.empty?
+
+          integrations.map { |name, integration| "#{name}@#{integration.class.version}" }.join(','.freeze)
+        end
+
+        # Ruby VM name and version.
+        # Examples: "ruby-2.7.1", "jruby-9.2.11.1", "truffleruby-20.1.0"
+        # @return [String, nil]
+        def vm
+          # RUBY_ENGINE_VERSION returns the VM version, which
+          # will differ from RUBY_VERSION for non-mri VMs.
+          if defined?(RUBY_ENGINE_VERSION)
+            "#{RUBY_ENGINE}-#{RUBY_ENGINE_VERSION}"
+          else
+            # Ruby < 2.3 doesn't support RUBY_ENGINE_VERSION
+            "#{RUBY_ENGINE}-#{RUBY_VERSION}"
+          end
+        end
+
+        # @return [Boolean, nil] partial flushing enabled in configuration
+        def partial_flushing_enabled
+          !!Datadog.configuration.tracing.partial_flush.enabled
+        end
+
+        # @return [Boolean, nil] priority sampling enabled in configuration
+        def priority_sampling_enabled
+          !!Datadog.configuration.tracing.priority_sampling
+        end
+
+        # @return [Boolean, nil] health metrics enabled in configuration
+        def health_metrics_enabled
+          !!Datadog.configuration.diagnostics.health_metrics.enabled
+        end
+
+        def profiling_enabled
+          !!Datadog.configuration.profiling.enabled
+        end
+
+        # TODO: Populate when automatic log correlation is implemented
+        # def logs_correlation_enabled
+        # end
+
+        # @return [Hash] environment information available at call time
+        def collect!(transport_responses)
+          {
+            date: date,
+            os_name: os_name,
+            version: version,
+            lang: lang,
+            lang_version: lang_version,
+            env: env,
+            enabled: enabled,
+            service: service,
+            dd_version: dd_version,
+            agent_url: agent_url,
+            agent_error: agent_error(transport_responses),
+            debug: debug,
+            analytics_enabled: analytics_enabled,
+            sample_rate: sample_rate,
+            sampling_rules: sampling_rules,
+            tags: tags,
+            runtime_metrics_enabled: runtime_metrics_enabled,
+            integrations_loaded: integrations_loaded,
+            vm: vm,
+            partial_flushing_enabled: partial_flushing_enabled,
+            priority_sampling_enabled: priority_sampling_enabled,
+            health_metrics_enabled: health_metrics_enabled,
+            profiling_enabled: profiling_enabled,
+            **instrumented_integrations_settings
+          }
+        end
+
+        private
+
+        def instrumented_integrations
+          Datadog.configuration.tracing.instrumented_integrations
+        end
+
+        # Capture all active integration settings into "integrationName_settingName: value" entries.
+        def instrumented_integrations_settings
+          instrumented_integrations.flat_map do |name, integration|
+            integration.configuration.to_h.flat_map do |setting, value|
+              next [] if setting == :tracer # Skip internal Ruby objects
+
+              # Convert value to a string to avoid custom #to_json
+              # handlers possibly causing errors.
+              [[:"integration_#{name}_#{setting}", value.to_s]]
+            end
+          end.to_h
+        end
+
+        # Outputs "k1:v1,k2:v2,..."
+        def hash_serializer(h)
+          h.map { |k, v| "#{k}:#{v}" }.join(','.freeze)
+        end
+      end
+    end
+  end
+end
