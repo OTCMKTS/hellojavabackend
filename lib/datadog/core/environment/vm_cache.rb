@@ -34,4 +34,29 @@ module Datadog
         # Since Ruby 3.0, the method class is kept on a per-class basis,
         # largely mitigating global method cache busting. `global_method_state`
         # is thus not available since Ruby 3.0.
-        # @see ht
+        # @see https://bugs.ruby-lang.org/issues/16614
+        def global_method_state
+          ::RubyVM.stat[:global_method_state]
+        end
+
+        # Introduced in Ruby 3.2 to match an improved cache implementation.
+        #
+        # @see https://bugs.ruby-lang.org/issues/18589
+        def constant_cache_invalidations
+          ::RubyVM.stat[:constant_cache_invalidations]
+        end
+
+        # Introduced in Ruby 3.2 to match an improved cache implementation.
+        #
+        # @see https://bugs.ruby-lang.org/issues/18589
+        def constant_cache_misses
+          ::RubyVM.stat[:constant_cache_misses]
+        end
+
+        def available?
+          defined?(::RubyVM) && ::RubyVM.respond_to?(:stat)
+        end
+      end
+    end
+  end
+end
