@@ -21,4 +21,22 @@ module Datadog
           end
 
           def count(stat, value, options = nil)
-            logger.info({ stat: s
+            logger.info({ stat: stat, type: :count, value: value, options: options }.to_json)
+          end
+
+          def distribution(stat, value, options = nil)
+            logger.info({ stat: stat, type: :distribution, value: value, options: options }.to_json)
+          end
+
+          def increment(stat, options = nil)
+            logger.info({ stat: stat, type: :increment, options: options }.to_json)
+          end
+
+          def gauge(stat, value, options = nil)
+            logger.info({ stat: stat, type: :gauge, value: value, options: options }.to_json)
+          end
+        end
+      end
+    end
+  end
+end
