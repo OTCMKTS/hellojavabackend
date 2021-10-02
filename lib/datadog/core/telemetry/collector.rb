@@ -65,4 +65,132 @@ module Datadog
             hostname: Core::Environment::Platform.hostname,
             kernel_name: Core::Environment::Platform.kernel_name,
             kernel_release: Core::Environment::Platform.kernel_release,
-            kernel_version: Core::En
+            kernel_version: Core::Environment::Platform.kernel_version
+          )
+        end
+
+        # Forms a telemetry app-started integrations object
+        def integrations
+          Datadog.registry.map do |integration|
+            is_instrumented = instrumented?(integration)
+            is_enabled = is_instrumented && patched?(integration)
+            Telemetry::V1::Integration.new(
+              name: integration.name.to_s,
+              enabled: is_enabled,
+              version: integration_version(integration),
+              compatible: integration_compatible?(integration),
+              error: (patch_error(integration) if is_instrumented && !is_enabled),
+              auto_enabled: is_enabled ? integration_auto_instrument?(integration) : nil
+            )
+          end
+        end
+
+        # Returns the runtime ID of the current process
+        def runtime_id
+          Datadog::Core::Environment::Identity.id
+        end
+
+        # Returns the current as a UNIX timestamp in seconds
+        def tracer_time
+          Time.now.to_i
+        end
+
+        private
+
+        TARGET_OPTIONS = [
+          'ci.enabled',
+          'logger.level',
+          'profiling.advanced.code_provenance_enabled',
+          'profiling.advanced.endpoint.collection.enabled',
+          'profiling.enabled',
+          'runtime_metrics.enabled',
+          'tracing.analytics.enabled',
+          'tracing.distributed_tracing.propagation_inject_style',
+          'tracing.distributed_tracing.propagation_extract_style',
+          'tracing.enabled',
+          'tracing.log_injection',
+          'tracing.partial_flush.enabled',
+          'tracing.partial_flush.min_spans_threshold',
+          'tracing.priority_sampling',
+          'tracing.report_hostname',
+          'tracing.sampling.default_rate',
+          'tracing.sampling.rate_limit'
+        ].freeze
+
+        def additional_payload_variables
+          # Whitelist of configuration options to send in additional payload object
+          configuration = Datadog.configuration
+          options = TARGET_OPTIONS.each_with_object({}) do |option, hash|
+            split_option = option.split('.')
+            hash[option] = format_configuration_value(configuration.dig(*split_option))
+          end
+
+          # Add some more custom additional payload values here
+          options['tracing.auto_instrument.enabled'] = !defined?(Datadog::AutoInstrument::LOADED).nil?
+          options['tracing.writer_options.buffer_size'] =
+            format_configuration_value(configuration.tracing.writer_options[:buffer_size])
+          options['tracing.writer_options.flush_interval'] =
+            format_configuration_value(configuration.tracing.writer_options[:flush_interval])
+          options['logger.instance'] = configuration.logger.instance.class.to_s
+          options['appsec.enabled'] = configuration.dig('appsec', 'enabled') if configuration.respond_to?('appsec')
+          options['tracing.opentelemetry.enabled'] = !defined?(Datadog::OpenTelemetry::LOADED).nil?
+          compact_hash(options)
+        end
+
+        def format_configuration_value(value)
+          # TODO: Add float if telemetry starts accepting it
+          case value
+          when Integer, String, true, false, nil
+            value
+          else
+            value.to_s
+          end
+        end
+
+        # Manual implementation of hash.compact used because it is unsupported by older Ruby versions (<2.4)
+        def compact_hash(hash)
+          hash.delete_if { |_k, v| v.nil? }
+        end
+
+        def env
+          Datadog.configuration.env
+        end
+
+        def service_name
+          Datadog.configuration.service
+        end
+
+        def service_version
+          Datadog.configuration.version
+        end
+
+        def library_version
+          Core::Environment::Identity.tracer_version
+        end
+
+        def products
+          Telemetry::V1::Product.new(profiler: profiler, appsec: appsec)
+        end
+
+        def profiler
+          { version: library_version }
+        end
+
+        def appsec
+          { version: library_version }
+        end
+
+        def agent_transport
+          adapter = Core::Configuration::AgentSettingsResolver.call(Datadog.configuration).adapter
+          if adapter == Datadog::Transport::Ext::UnixSocket::ADAPTER
+            'UDS'
+          else
+            'TCP'
+          end
+        end
+
+        def instrumented_integrations
+          Datadog.configuration.tracing.instrumented_integrations
+        end
+
+    
