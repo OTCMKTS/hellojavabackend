@@ -74,4 +74,13 @@ module Datadog
           #
           # @!visibility private
           def validate(language_name:, language_version:, service_name:, tracer_version:)
-            raise ArgumentError, ERROR_NIL_LANGUAGE_NA
+            raise ArgumentError, ERROR_NIL_LANGUAGE_NAME_MESSAGE if language_name.nil?
+            raise ArgumentError, ERROR_NIL_LANGUAGE_VERSION_MESSAGE if language_version.nil?
+            raise ArgumentError, ERROR_NIL_SERVICE_NAME_MESSAGE if service_name.nil?
+            raise ArgumentError, ERROR_NIL_TRACER_VERSION_MESSAGE if tracer_version.nil?
+          end
+        end
+      end
+    end
+  end
+end
