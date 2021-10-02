@@ -43,4 +43,25 @@ module Datadog
           when :'app-closing', :'app-heartbeat'
             {}
           when :'app-integrations-change'
-            app_integrations_c
+            app_integrations_change
+          else
+            raise ArgumentError, "Request type invalid, received request_type: #{@request_type}"
+          end
+        end
+
+        def app_started
+          Telemetry::V1::AppEvent.new(
+            dependencies: dependencies,
+            integrations: integrations,
+            configuration: configurations,
+            additional_payload: additional_payload
+          )
+        end
+
+        def app_integrations_change
+          Telemetry::V1::AppEvent.new(integrations: integrations)
+        end
+      end
+    end
+  end
+end
