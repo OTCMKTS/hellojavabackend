@@ -193,4 +193,39 @@ module Datadog
           Datadog.configuration.tracing.instrumented_integrations
         end
 
-    
+        def instrumented?(integration)
+          instrumented_integrations.include?(integration.name)
+        end
+
+        def patched?(integration)
+          !!integration.klass.patcher.patch_successful
+        end
+
+        def integration_auto_instrument?(integration)
+          integration.klass.auto_instrument?
+        end
+
+        def integration_compatible?(integration)
+          integration.klass.class.compatible?
+        end
+
+        def integration_version(integration)
+          integration.klass.class.version ? integration.klass.class.version.to_s : nil
+        end
+
+        def patch_error(integration)
+          patch_error_result = integration.klass.patcher.patch_error_result
+          if patch_error_result.nil? # if no error occurred during patching, but integration is still not instrumented
+            desc = "Available?: #{integration.klass.class.available?}"
+            desc += ", Loaded? #{integration.klass.class.loaded?}"
+            desc += ", Compatible? #{integration.klass.class.compatible?}"
+            desc += ", Patchable? #{integration.klass.class.patchable?}"
+            desc
+          else
+            patch_error_result.to_s
+          end
+        end
+      end
+    end
+  end
+end
