@@ -50,4 +50,12 @@ module Datadog
             end
           else
             def initialize(*args, &block)
-         
+              super(*args, &block)
+              update_fork_pid!
+            end
+          end
+        end
+      end
+    end
+  end
+end
