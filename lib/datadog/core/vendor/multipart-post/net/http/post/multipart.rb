@@ -18,4 +18,17 @@ module Datadog
         class HTTP
           class Put
             class Multipart < ::Net::HTTP::Put
-              i
+              include Vendor::Multipart::Post::Multipartable
+            end
+          end
+
+          class Post
+            class Multipart < ::Net::HTTP::Post
+              include Vendor::Multipart::Post::Multipartable
+            end
+          end
+        end
+      end
+    end
+  end
+end
