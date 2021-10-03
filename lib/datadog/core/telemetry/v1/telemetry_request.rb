@@ -45,4 +45,56 @@ module Datadog
               api_version: api_version,
               application: application,
               host: host,
-              payload: payl
+              payload: payload,
+              request_type: request_type,
+              runtime_id: runtime_id,
+              seq_id: seq_id,
+              tracer_time: tracer_time
+            )
+            @api_version = api_version
+            @application = application
+            @debug = debug
+            @host = host
+            @payload = payload
+            @request_type = request_type
+            @runtime_id = runtime_id
+            @seq_id = seq_id
+            @session_id = session_id
+            @tracer_time = tracer_time
+          end
+
+          def to_h
+            {
+              api_version: @api_version,
+              application: @application.to_h,
+              debug: @debug,
+              host: @host.to_h,
+              payload: @payload.to_h,
+              request_type: @request_type,
+              runtime_id: @runtime_id,
+              seq_id: @seq_id,
+              session_id: @session_id,
+              tracer_time: @tracer_time
+            }
+          end
+
+          private
+
+          # Validates all required arguments passed to the class on initialization are not nil
+          #
+          # @!visibility private
+          def validate(api_version:, application:, host:, payload:, request_type:, runtime_id:, seq_id:, tracer_time:)
+            raise ArgumentError, ERROR_NIL_API_VERSION_MESSAGE if api_version.nil?
+            raise ArgumentError, ERROR_NIL_APPLICATION_MESSAGE if application.nil?
+            raise ArgumentError, ERROR_NIL_HOST_MESSAGE if host.nil?
+            raise ArgumentError, ERROR_NIL_PAYLOAD_MESSAGE if payload.nil?
+            raise ArgumentError, ERROR_NIL_REQUEST_TYPE_MESSAGE if request_type.nil?
+            raise ArgumentError, ERROR_NIL_RUNTIME_ID_MESSAGE if runtime_id.nil?
+            raise ArgumentError, ERROR_NIL_SEQ_ID_MESSAGE if seq_id.nil?
+            raise ArgumentError, ERROR_NIL_TRACER_TIME_MESSAGE if tracer_time.nil?
+          end
+        end
+      end
+    end
+  end
+end
