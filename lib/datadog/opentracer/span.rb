@@ -72,3 +72,28 @@ module Datadog
       #
       # Add a log entry to this span
       # @param event [String] event name for the log
+      # @param timestamp [Time] time of the log
+      # @param fields [Hash] Additional information to log
+      def log(event: nil, timestamp: Time.now, **fields)
+        super # Log deprecation warning
+
+        # If the fields specify an error
+        datadog_span.set_error(fields[:'error.object']) if fields.key?(:'error.object')
+      end
+
+      # Add a log entry to this span
+      # @param timestamp [Time] time of the log
+      # @param fields [Hash] Additional information to log
+      def log_kv(timestamp: Time.now, **fields)
+        # If the fields specify an error
+        datadog_span.set_error(fields[:'error.object']) if fields.key?(:'error.object')
+      end
+
+      # Finish the {Span}
+      # @param end_time [Time] custom end time, if not now
+      def finish(end_time: Time.now)
+        datadog_span.finish(end_time)
+      end
+    end
+  end
+end
