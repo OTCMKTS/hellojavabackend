@@ -190,4 +190,91 @@ module Datadog
         # Re-use old backtrace location objects if they already exist in the buffer
         def convert_backtrace_locations(locations)
           locations.collect do |location|
-            # Re-use existing BacktraceLocat
+            # Re-use existing BacktraceLocation if identical copy, otherwise build a new one.
+            @stack_sample_event_recorder.cache(:backtrace_locations).fetch(
+              # Function name
+              location.base_label,
+              # Line number
+              location.lineno,
+              # Filename
+              location.path,
+              # Build function
+              &@build_backtrace_location
+            )
+          end
+        end
+
+        def build_backtrace_location(_id, base_label, lineno, path)
+          string_table = @stack_sample_event_recorder.string_table
+
+          Profiling::BacktraceLocation.new(
+            string_table.fetch_string(base_label),
+            lineno,
+            string_table.fetch_string(path)
+          )
+        end
+
+        def reset_after_fork
+          recorder.reset_after_fork
+
+          # NOTE: We could perhaps also call #reset_cpu_time_tracking here, although it's not needed because we always
+          # call in in #start.
+        end
+
+        private
+
+        # If the profiler is started for a while, stopped and then restarted OR whenever the process forks, we need to
+        # clean up any leftover per-thread counters, so that the first sample after starting doesn't end up with:
+        #
+        # a) negative time: At least on my test docker container, and on the reliability environment, after the process
+        #    forks, the cpu time reference changes and (old cpu time - new cpu time) can be < 0
+        #
+        # b) large amount of time: if the profiler was started, then stopped for some amount of time, and then
+        #    restarted, we don't want the first sample to be "blamed" for multiple minutes of CPU time
+        #
+        # By resetting the last cpu time seen, we start with a clean slate every time we start the stack collector.
+        def reset_cpu_time_tracking
+          thread_api.list.each do |thread|
+            # See below for details on why this is needed
+            next if @needs_process_waiter_workaround && thread.is_a?(::Process::Waiter)
+
+            thread.thread_variable_set(THREAD_LAST_CPU_TIME_KEY, nil)
+            thread.thread_variable_set(THREAD_LAST_WALL_CLOCK_KEY, nil)
+          end
+        end
+
+        def get_elapsed_since_last_sample_and_set_value(thread, key, current_value)
+          # Process::Waiter crash workaround:
+          #
+          # This is a workaround for a Ruby VM segfault (usually something like
+          # "[BUG] Segmentation fault at 0x0000000000000008") in the affected Ruby versions.
+          # See https://bugs.ruby-lang.org/issues/17807 for details.
+          #
+          # In those Ruby versions, there's a very special subclass of `Thread` called `Process::Waiter` that causes VM
+          # crashes whenever something tries to read its instance or thread variables. This subclass of thread only
+          # shows up when the `Process.detach` API gets used.
+          # In the specs you'll find crash regression tests that include a way of reproducing it.
+          #
+          # As workaround for now we just skip it for the affected Rubies
+          return 0 if @needs_process_waiter_workaround && thread.is_a?(::Process::Waiter)
+
+          last_value = thread.thread_variable_get(key) || current_value
+          thread.thread_variable_set(key, current_value)
+
+          current_value - last_value
+        end
+
+        # Whenever there are more than max_threads_sampled active, we only sample a subset of them.
+        # We do this to avoid impacting the latency of the service being profiled. We want to avoid doing
+        # a big burst of work all at once (sample everything), and instead do a little work each time
+        # (sample a bit by bit).
+        #
+        # Because we pick the threads to sample randomly, we'll eventually sample all threads -- just not at once.
+        # Notice also that this will interact with our dynamic sampling mechanism -- if samples are faster, we take
+        # them more often, if they are slower, we take them less often -- which again means that over a longer period
+        # we should take sample roughly the same samples.
+        #
+        # One downside of this approach is that if there really are many threads, the resulting wall clock times
+        # in a one minute profile may "drift" around the 60 second mark, e.g. maybe we only sampled a thread once per
+        # second and only 59 times, so we'll report 59s, but on the next report we'll include the missing one, so
+        # then the result will be 61s. I've observed 60 +- 1.
