@@ -277,4 +277,25 @@ module Datadog
         # One downside of this approach is that if there really are many threads, the resulting wall clock times
         # in a one minute profile may "drift" around the 60 second mark, e.g. maybe we only sampled a thread once per
         # second and only 59 times, so we'll report 59s, but on the next report we'll include the missing one, so
-        # then the result will be 61s. I've observed 60 +- 1.
+        # then the result will be 61s. I've observed 60 +- 1.68 secs for an app with ~65 threads, given the
+        # default maximum of 16 threads. This seems a reasonable enough margin of error given the improvement to
+        # latency (especially on such a large application! -> even bigger latency impact if we tried to sample all
+        # threads).
+        #
+        def threads_to_sample
+          all_threads = thread_api.list
+
+          if all_threads.size > @max_threads_sampled
+            all_threads.sample(@max_threads_sampled)
+          else
+            all_threads
+          end
+        end
+
+        def get_current_wall_time_timestamp_ns
+          Core::Utils::Time.get_time(:nanosecond)
+        end
+      end
+    end
+  end
+end
