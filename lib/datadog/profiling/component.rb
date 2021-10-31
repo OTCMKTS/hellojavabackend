@@ -54,4 +54,108 @@ module Datadog
           )
 
           return
-  
+        end
+
+        # Load extensions needed to support some of the Profiling features
+        Profiling::Tasks::Setup.new.run
+
+        # NOTE: Please update the Initialization section of ProfilingDevelopment.md with any changes to this method
+
+        if settings.profiling.advanced.force_enable_new_profiler
+          print_new_profiler_warnings
+
+          recorder = Datadog::Profiling::StackRecorder.new(
+            cpu_time_enabled: RUBY_PLATFORM.include?('linux'), # Only supported on Linux currently
+            alloc_samples_enabled: false, # Always disabled for now -- work in progress
+          )
+          collector = Datadog::Profiling::Collectors::CpuAndWallTimeWorker.new(
+            recorder: recorder,
+            max_frames: settings.profiling.advanced.max_frames,
+            tracer: tracer,
+            gc_profiling_enabled: should_enable_gc_profiling?(settings),
+            allocation_counting_enabled: settings.profiling.advanced.allocation_counting_enabled,
+          )
+        else
+          trace_identifiers_helper = Profiling::TraceIdentifiers::Helper.new(
+            tracer: tracer,
+            endpoint_collection_enabled: settings.profiling.advanced.endpoint.collection.enabled
+          )
+
+          recorder = build_profiler_old_recorder(settings)
+          collector = build_profiler_oldstack_collector(settings, recorder, trace_identifiers_helper)
+        end
+
+        exporter = build_profiler_exporter(settings, recorder)
+        transport = build_profiler_transport(settings, agent_settings)
+        scheduler = Profiling::Scheduler.new(exporter: exporter, transport: transport)
+
+        Profiling::Profiler.new([collector], scheduler)
+      end
+
+      private
+
+      def build_profiler_old_recorder(settings)
+        Profiling::OldRecorder.new([Profiling::Events::StackSample], settings.profiling.advanced.max_events)
+      end
+
+      def build_profiler_exporter(settings, recorder)
+        code_provenance_collector =
+          (Profiling::Collectors::CodeProvenance.new if settings.profiling.advanced.code_provenance_enabled)
+
+        Profiling::Exporter.new(pprof_recorder: recorder, code_provenance_collector: code_provenance_collector)
+      end
+
+      def build_profiler_oldstack_collector(settings, old_recorder, trace_identifiers_helper)
+        Profiling::Collectors::OldStack.new(
+          old_recorder,
+          trace_identifiers_helper: trace_identifiers_helper,
+          max_frames: settings.profiling.advanced.max_frames
+        )
+      end
+
+      def build_profiler_transport(settings, agent_settings)
+        settings.profiling.exporter.transport ||
+          Profiling::HttpTransport.new(
+            agent_settings: agent_settings,
+            site: settings.site,
+            api_key: settings.api_key,
+            upload_timeout_seconds: settings.profiling.upload.timeout_seconds,
+          )
+      end
+
+      def should_enable_gc_profiling?(settings)
+        # See comments on the setting definition for more context on why it exists.
+        if settings.profiling.advanced.force_enable_gc_profiling
+          if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3')
+            Datadog.logger.debug(
+              'Profiling time/resources spent in Garbage Collection force enabled. Do not use Ractors in combination ' \
+              'with this option as profiles will be incomplete.'
+            )
+          end
+
+          true
+        else
+          false
+        end
+      end
+
+      def print_new_profiler_warnings
+        if Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('2.6')
+          Datadog.logger.warn(
+            'New Ruby profiler has been force-enabled. This is a beta feature. Please report any issues ' \
+            'you run into to Datadog support or via <https://github.com/datadog/dd-trace-rb/issues/new>!'
+          )
+        else
+          # For more details on the issue, see the "BIG Issue" comment on `gvl_owner` function in
+          # `private_vm_api_access.c`.
+          Datadog.logger.warn(
+            'New Ruby profiler has been force-enabled on a legacy Ruby version (< 2.6). This is not recommended in ' \
+            'production environments, as due to limitations in Ruby APIs, we suspect it may lead to crashes in very ' \
+            'rare situations. Please report any issues you run into to Datadog support or ' \
+            'via <https://github.com/datadog/dd-trace-rb/issues/new>!'
+          )
+        end
+      end
+    end
+  end
+end
