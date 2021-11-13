@@ -23,4 +23,23 @@ module Datadog
           supported_apis: DEFAULT_SUPPORTED_APIS.map { |api| api.new(tracer: tracer) }
         )
           @endpoint_collection_enabled = endpoint_collection_enabled
-  
+          @supported_apis = supported_apis
+        end
+
+        # Expected output of the #trace_identifiers_for
+        # duck type is [root_span_id, span_id, (optional trace_resource_container)]
+        def trace_identifiers_for(thread)
+          @supported_apis.each do |api|
+            trace_identifiers = api.trace_identifiers_for(thread)
+
+            if trace_identifiers
+              return @endpoint_collection_enabled ? trace_identifiers : trace_identifiers[0..1]
+            end
+          end
+
+          nil
+        end
+      end
+    end
+  end
+end
