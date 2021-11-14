@@ -1,20 +1,20 @@
 require_relative '../../../metadata/ext'
-require_relative '../../analytics'
 require_relative '../event'
+require_relative '../ext'
+require_relative '../../analytics'
 
 module Datadog
   module Tracing
     module Contrib
       module ActionCable
         module Events
-          # Defines instrumentation for 'perform_action.action_cable' event.
+          # Defines instrumentation for 'transmit.action_cable' event.
           #
-          # An action, triggered by a WebSockets client, invokes a method
-          # in the server's channel instance.
-          module PerformAction
-            include ActionCable::RootContextEvent
+          # A 'transmit' event sends a message to a single client subscribed to a channel.
+          module Transmit
+            include ActionCable::Event
 
-            EVENT_NAME = 'perform_action.action_cable'.freeze
+            EVENT_NAME = 'transmit.action_cable'.freeze
 
             module_function
 
@@ -23,20 +23,19 @@ module Datadog
             end
 
             def span_name
-              Ext::SPAN_ACTION
+              Ext::SPAN_TRANSMIT
             end
 
             def span_type
-              # A request to perform_action comes from a WebSocket connection
+              # ActionCable transmits data over WebSockets
               Tracing::Metadata::Ext::AppTypes::TYPE_WEB
             end
 
             def process(span, _event, _id, payload)
               channel_class = payload[:channel_class]
-              action = payload[:action]
 
               span.service = configuration[:service_name] if configuration[:service_name]
-              span.resource = "#{channel_class}##{action}"
+              span.resource = channel_class
               span.span_type = span_type
 
               # Set analytics sample rate
@@ -44,14 +43,11 @@ module Datadog
                 Contrib::Analytics.set_sample_rate(span, configuration[:analytics_sample_rate])
               end
 
-              # Measure service stats
-              Contrib::Analytics.set_measured(span)
-
               span.set_tag(Ext::TAG_CHANNEL_CLASS, channel_class)
-              span.set_tag(Ext::TAG_ACTION, action)
+              span.set_tag(Ext::TAG_TRANSMIT_VIA, payload[:via])
 
               span.set_tag(Tracing::Metadata::Ext::TAG_COMPONENT, Ext::TAG_COMPONENT)
-              span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_ACTION)
+              span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_TRANSMIT)
             end
           end
         end
