@@ -55,3 +55,22 @@ module Datadog
             def with_datadog_span(span)
               self.active_datadog_span = span
               yield
+            ensure
+              self.active_datadog_span = nil
+            end
+
+            # Rails < 4 partial rendering
+            # ActiveSupport events are used instead for Rails >= 4
+            module RailsLessThan4
+              include PartialRenderer
+
+              def datadog_template(*args)
+                @template
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
