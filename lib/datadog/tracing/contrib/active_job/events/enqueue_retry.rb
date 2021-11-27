@@ -1,3 +1,4 @@
+
 require_relative '../../../metadata/ext'
 require_relative '../../analytics'
 require_relative '../ext'
@@ -8,11 +9,11 @@ module Datadog
     module Contrib
       module ActiveJob
         module Events
-          # Defines instrumentation for enqueue_at.active_job event
-          module EnqueueAt
+          # Defines instrumentation for enqueue_retry.active_job event
+          module EnqueueRetry
             include ActiveJob::Event
 
-            EVENT_NAME = 'enqueue_at.active_job'.freeze
+            EVENT_NAME = 'enqueue_retry.active_job'.freeze
 
             module_function
 
@@ -21,14 +22,14 @@ module Datadog
             end
 
             def span_name
-              Ext::SPAN_ENQUEUE
+              Ext::SPAN_ENQUEUE_RETRY
             end
 
             def process(span, event, _id, payload)
               span.name = span_name
               span.service = configuration[:service_name] if configuration[:service_name]
               span.resource = payload[:job].class.name
-              span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_ENQUEUE_AT)
+              span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_ENQUEUE_RETRY)
 
               # Set analytics sample rate
               if Contrib::Analytics.enabled?(configuration[:analytics_enabled])
@@ -36,6 +37,8 @@ module Datadog
               end
 
               set_common_tags(span, payload)
+              span.set_tag(Ext::TAG_JOB_ERROR, payload[:error])
+              span.set_tag(Ext::TAG_JOB_RETRY_WAIT, payload[:wait])
             rescue StandardError => e
               Datadog.logger.debug(e.message)
             end
