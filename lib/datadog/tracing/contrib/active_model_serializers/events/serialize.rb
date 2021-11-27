@@ -33,4 +33,13 @@ module Datadog
             def process(span, _event, _id, payload)
               span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_SERIALIZE)
 
-              set_
+              set_common_tags(span, payload)
+            rescue StandardError => e
+              Datadog.logger.debug(e.message)
+            end
+          end
+        end
+      end
+    end
+  end
+end
