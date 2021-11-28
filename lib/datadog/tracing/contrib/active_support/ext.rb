@@ -23,4 +23,7 @@ module Datadog
           TAG_COMPONENT = 'active_support'.freeze
           TAG_OPERATION_CACHE = 'cache'.freeze
         end
-      en
+      end
+    end
+  end
+end
