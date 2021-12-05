@@ -44,4 +44,40 @@ module Datadog
           # previously stored by `#add`.
           #
           # @param [Object] matcher integration-specific matcher
-          # @return [Object] previous
+          # @return [Object] previously stored `value` from `#add`, or `nil` if not found
+          def get(matcher)
+            @configurations[parse_matcher(matcher)]
+          end
+
+          # Matches an arbitrary value against the configured
+          # matchers previously set with `#add`.
+          #
+          # If multiple matchers would match, returns the latest one.
+          #
+          # @param [Object] value integration-specific value
+          # @return [Object] matching `value` configured at `#add`, or `nil` if none match
+          def resolve(value)
+            @configurations[value]
+          end
+
+          protected
+
+          # Converts `matcher` into an appropriate key
+          # for the internal Hash storage.
+          #
+          # It's recommended to override this method,
+          # instead of the public methods, if the
+          # integration can simply convert both
+          # `matcher` (provided to `#add`) and `value`
+          # (provided to `#resolve`) to the same value.
+          #
+          # @param [Object] matcher integration-specific matcher
+          # @return [Object] processed matcher
+          def parse_matcher(matcher)
+            matcher
+          end
+        end
+      end
+    end
+  end
+end
