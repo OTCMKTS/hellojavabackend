@@ -1,13 +1,12 @@
-require_relative '../../../span_operation'
 require_relative '../../configuration/settings'
 require_relative '../ext'
 
 module Datadog
   module Tracing
     module Contrib
-      module DelayedJob
+      module Elasticsearch
         module Configuration
-          # Custom settings for the DelayedJob integration
+          # Custom settings for the Elasticsearch integration
           # @public_api
           class Settings < Contrib::Configuration::Settings
             option :enabled do |o|
@@ -25,9 +24,12 @@ module Datadog
               o.lazy
             end
 
-            option :service_name
-            option :client_service_name
-            option :error_handler, default: Tracing::SpanOperation::Events::DEFAULT_ON_ERROR
+            option :quantize, default: {}
+
+            option :service_name do |o|
+              o.default { ENV.fetch(Ext::ENV_SERVICE_NAME, Ext::DEFAULT_PEER_SERVICE_NAME) }
+              o.lazy
+            end
           end
         end
       end
