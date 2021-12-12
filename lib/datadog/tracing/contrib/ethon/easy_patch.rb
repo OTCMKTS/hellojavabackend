@@ -120,4 +120,55 @@ module Datadog
               span = @datadog_span
               method = Ext::NOT_APPLICABLE_METHOD
               method = @datadog_method.to_s if instance_variable_defined?(:@datadog_method) && !@datadog_method.nil?
-   
+              span.resource = method
+              # Tag as an external peer service
+              span.set_tag(Tracing::Metadata::Ext::TAG_PEER_SERVICE, span.service)
+              # Set analytics sample rate
+              Contrib::Analytics.set_sample_rate(span, analytics_sample_rate) if analytics_enabled?
+
+              span.set_tag(Tracing::Metadata::Ext::TAG_COMPONENT, Ext::TAG_COMPONENT)
+              span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_REQUEST)
+
+              span.set_tag(Tracing::Metadata::Ext::TAG_KIND, Tracing::Metadata::Ext::SpanKind::TAG_CLIENT)
+
+              uri = try_parse_uri
+              return unless uri
+
+              span.set_tag(Tracing::Metadata::Ext::HTTP::TAG_URL, uri.path)
+              span.set_tag(Tracing::Metadata::Ext::HTTP::TAG_METHOD, method)
+              span.set_tag(Tracing::Metadata::Ext::NET::TAG_TARGET_HOST, uri.host)
+              span.set_tag(Tracing::Metadata::Ext::NET::TAG_TARGET_PORT, uri.port)
+
+              span.set_tag(Tracing::Metadata::Ext::TAG_PEER_HOSTNAME, uri.host)
+            end
+
+            def set_span_error_message(message)
+              # Sets span error from message, in case there is no exception available
+              @datadog_span.status = Tracing::Metadata::Ext::Errors::STATUS
+              @datadog_span.set_tag(Tracing::Metadata::Ext::Errors::TAG_MSG, message)
+            end
+
+            # rubocop:disable Lint/SuppressedException
+            def try_parse_uri
+              URI.parse(url)
+            rescue URI::InvalidURIError
+            end
+            # rubocop:enable Lint/SuppressedException
+
+            def load_datadog_configuration_for(host = :default)
+              @datadog_configuration = Datadog.configuration.tracing[:ethon, host]
+            end
+
+            def analytics_enabled?
+              Contrib::Analytics.enabled?(datadog_configuration[:analytics_enabled])
+            end
+
+            def analytics_sample_rate
+              datadog_configuration[:analytics_sample_rate]
+            end
+          end
+        end
+      end
+    end
+  end
+end
