@@ -1,13 +1,13 @@
+
 require_relative '../../configuration/settings'
 require_relative '../ext'
-require_relative '../../status_code_matcher'
 
 module Datadog
   module Tracing
     module Contrib
-      module Grape
+      module GraphQL
         module Configuration
-          # Custom settings for the Grape integration
+          # Custom settings for the GraphQL integration
           # @public_api
           class Settings < Contrib::Configuration::Settings
             option :enabled do |o|
@@ -25,13 +25,8 @@ module Datadog
               o.lazy
             end
 
+            option :schemas
             option :service_name
-
-            option :error_statuses, default: nil do |o|
-              o.setter do |new_value, _old_value|
-                Contrib::StatusCodeMatcher.new(new_value) unless new_value.nil?
-              end
-            end
           end
         end
       end
