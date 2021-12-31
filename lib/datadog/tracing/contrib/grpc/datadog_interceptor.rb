@@ -43,4 +43,63 @@ module Datadog
             end
 
             def service_name
-              Datadog.configuration_for(self, :service_name) || datadog_
+              Datadog.configuration_for(self, :service_name) || datadog_configuration[:service_name]
+            end
+
+            def analytics_enabled?
+              Contrib::Analytics.enabled?(datadog_configuration[:analytics_enabled])
+            end
+
+            def distributed_tracing?
+              Datadog.configuration_for(self, :distributed_tracing) || datadog_configuration[:distributed_tracing]
+            end
+
+            def analytics_sample_rate
+              datadog_configuration[:analytics_sample_rate]
+            end
+
+            def error_handler
+              datadog_configuration[:error_handler]
+            end
+
+            # Allows interceptors to define settings using methods instead of `[]`
+            class PinAdapter
+              OPTIONS = Configuration::Settings.instance_methods(false).freeze
+
+              attr_reader :options
+
+              def initialize
+                @options = {}
+              end
+
+              def self.add_setter!(option)
+                define_method(option) do |value|
+                  @options[option.to_s[0...-1].to_sym] = value
+                end
+              end
+
+              def self.add_getter!(option)
+                define_method(option) do
+                  return @options[option] if @options.key?(option)
+
+                  Datadog.configuration.tracing[:grpc][option]
+                end
+              end
+
+              OPTIONS.each do |option|
+                if option.to_s[-1] == '='
+                  add_setter!(option)
+                else
+                  add_getter!(option)
+                end
+              end
+            end
+          end
+
+          require_relative 'datadog_interceptor/client'
+          require_relative 'datadog_interceptor/server'
+        end
+      end
+    end
+  end
+end
