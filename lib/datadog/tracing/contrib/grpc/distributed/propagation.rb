@@ -32,4 +32,11 @@ module Datadog
             end
 
             # DEV: Singleton kept until a larger refactor is performed.
-            # DEV: See {Datadog::Tracing::Distributed::Propagation#initialize} for
+            # DEV: See {Datadog::Tracing::Distributed::Propagation#initialize} for more information.
+            INSTANCE = Propagation.new
+          end
+        end
+      end
+    end
+  end
+end
