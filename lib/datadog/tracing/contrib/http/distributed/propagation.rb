@@ -25,4 +25,13 @@ module Datadog
                   Tracing::Configuration::Ext::Distributed::PROPAGATION_STYLE_DATADOG =>
                     Tracing::Distributed::Datadog.new(fetcher: Fetcher),
                   Tracing::Configuration::Ext::Distributed::PROPAGATION_STYLE_TRACE_CONTEXT =>
-                    Tracing::Distributed::
+                    Tracing::Distributed::TraceContext.new(fetcher: Fetcher),
+                  Tracing::Configuration::Ext::Distributed::PROPAGATION_STYLE_NONE => Tracing::Distributed::None.new
+                })
+            end
+          end
+        end
+      end
+    end
+  end
+end
