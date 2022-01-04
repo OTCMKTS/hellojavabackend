@@ -101,4 +101,35 @@ module Datadog
             end
 
             def set_analytics_sample_rate(span, request_options)
-              
+              return unless analytics_enabled?(request_options)
+
+              Contrib::Analytics.set_sample_rate(span, analytics_sample_rate(request_options))
+            end
+
+            private
+
+            def host_and_port(request)
+              if request.respond_to?(:uri) && request.uri
+                [request.uri.host, request.uri.port]
+              else
+                [@address, @port]
+              end
+            end
+
+            def datadog_configuration(host = :default)
+              Datadog.configuration.tracing[:http, host]
+            end
+
+            def analytics_enabled?(request_options)
+              Contrib::Analytics.enabled?(request_options[:analytics_enabled])
+            end
+
+            def analytics_sample_rate(request_options)
+              request_options[:analytics_sample_rate]
+            end
+          end
+        end
+      end
+    end
+  end
+end
