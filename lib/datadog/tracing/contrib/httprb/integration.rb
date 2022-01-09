@@ -6,22 +6,22 @@ require_relative 'patcher'
 module Datadog
   module Tracing
     module Contrib
-      module Httpclient
-        # Description of Httpclient integration
+      module Httprb
+        # Description of Httprb integration
         class Integration
           include Contrib::Integration
 
-          MINIMUM_VERSION = Gem::Version.new('2.2.0')
+          MINIMUM_VERSION = Gem::Version.new('2.0.0')
 
           # @public_api Changing the integration name or integration options can cause breaking changes
-          register_as :httpclient
+          register_as :httprb
 
           def self.version
-            Gem.loaded_specs['httpclient'] && Gem.loaded_specs['httpclient'].version
+            Gem.loaded_specs['http'] && Gem.loaded_specs['http'].version
           end
 
           def self.loaded?
-            !defined?(::HTTPClient).nil?
+            !defined?(::HTTP).nil? && !defined?(::HTTP::Client).nil?
           end
 
           def self.compatible?
