@@ -1,14 +1,13 @@
+
 require_relative '../../configuration/settings'
 require_relative '../ext'
-
-require_relative '../../propagation/sql_comment/ext'
 
 module Datadog
   module Tracing
     module Contrib
-      module Pg
+      module Presto
         module Configuration
-          # Custom settings for the Pg integration
+          # Custom settings for the Presto integration
           # @public_api
           class Settings < Contrib::Configuration::Settings
             option :enabled do |o|
@@ -28,16 +27,6 @@ module Datadog
 
             option :service_name do |o|
               o.default { ENV.fetch(Ext::ENV_SERVICE_NAME, Ext::DEFAULT_PEER_SERVICE_NAME) }
-              o.lazy
-            end
-
-            option :comment_propagation do |o|
-              o.default do
-                ENV.fetch(
-                  Contrib::Propagation::SqlComment::Ext::ENV_DBM_PROPAGATION_MODE,
-                  Contrib::Propagation::SqlComment::Ext::DISABLED
-                )
-              end
               o.lazy
             end
           end
