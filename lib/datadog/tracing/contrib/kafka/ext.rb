@@ -39,4 +39,13 @@ module Datadog
           TAG_OPERATION_CONSUMER_JOIN_GROUP = 'consumer.join_group'.freeze
           TAG_OPERATION_CONSUMER_LEAVE_GROUP = 'consumer.leave_group'.freeze
           TAG_OPERATION_CONSUMER_SYNC_GROUP = 'consumer.sync_group'.freeze
-          TAG_OPERATION_DELIVER_
+          TAG_OPERATION_DELIVER_MESSAGES = 'producer.deliver_messages'.freeze
+          TAG_OPERATION_PROCESS_BATCH = 'consumer.process_batch'.freeze
+          TAG_OPERATION_PROCESS_MESSAGE = 'consumer.process_message'.freeze
+          TAG_OPERATION_SEND_MESSAGES = 'producer.send_messages'.freeze
+          TAG_MESSAGING_SYSTEM = 'kafka'.freeze
+        end
+      end
+    end
+  end
+end
