@@ -103,3 +103,16 @@ module Datadog
             AFTER_INITIALIZE_ONLY_ONCE_PER_APP[app].run do
               # Finish configuring the tracer after the application is initialized.
               # We need to wait for some things, like application name, middleware stack, etc.
+              setup_tracer
+            end
+          end
+
+          # Configure Rails tracing with settings
+          def setup_tracer
+            Contrib::Rails::Framework.setup
+          end
+        end
+      end
+    end
+  end
+end
