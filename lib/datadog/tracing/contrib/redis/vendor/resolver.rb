@@ -136,4 +136,25 @@ module Datadog
               #   if options[:tcp_keepalive] >= 60
               #     options[:tcp_keepalive] = {:time => options[:tcp_keepalive] - 20, :intvl => 10, :probes => 2}
 
-  
+              #   elsif options[:tcp_keepalive] >= 30
+              #     options[:tcp_keepalive] = {:time => options[:tcp_keepalive] - 10, :intvl => 5, :probes => 2}
+
+              #   elsif options[:tcp_keepalive] >= 5
+              #     options[:tcp_keepalive] = {:time => options[:tcp_keepalive] - 2, :intvl => 2, :probes => 1}
+              #   end
+              # end
+
+              options[:_parsed] = true
+
+              options
+            end
+
+            # rubocop:enable Metrics/AbcSize
+            # rubocop:enable Metrics/MethodLength
+            # rubocop:enable Metrics/PerceivedComplexity
+          end
+        end
+      end
+    end
+  end
+end
