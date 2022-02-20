@@ -38,4 +38,11 @@ module Datadog
               # # we want them to clobber ours, because we should allow them to override
               # # if needed.
               log.named_tags = datadog_trace_log_hash.merge(original_named_tags)
-              super(log, 
+              super(log, message, progname, &block)
+            end
+          end
+        end
+      end
+    end
+  end
+end
