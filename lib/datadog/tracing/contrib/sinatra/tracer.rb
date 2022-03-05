@@ -52,4 +52,33 @@ module Datadog
               Tracing.trace(
                 Ext::SPAN_ROUTE,
                 service: configuration[:service_name],
-                span_ty
+                span_type: Tracing::Metadata::Ext::HTTP::TYPE_INBOUND,
+                resource: "#{request.request_method} #{datadog_route}",
+              ) do |span, trace|
+                span.set_tag(Ext::TAG_APP_NAME, settings.name || settings.superclass.name)
+                span.set_tag(Ext::TAG_ROUTE_PATH, datadog_route)
+
+                if request.script_name && !request.script_name.empty?
+                  span.set_tag(Ext::TAG_SCRIPT_NAME, request.script_name)
+                end
+
+                span.set_tag(Tracing::Metadata::Ext::TAG_COMPONENT, Ext::TAG_COMPONENT)
+                span.set_tag(Tracing::Metadata::Ext::TAG_OPERATION, Ext::TAG_OPERATION_ROUTE)
+
+                trace.resource = span.resource
+
+                sinatra_request_span = Sinatra::Env.datadog_span(env)
+
+                sinatra_request_span.resource = span.resource
+
+                Contrib::Analytics.set_measured(span)
+
+                super
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
