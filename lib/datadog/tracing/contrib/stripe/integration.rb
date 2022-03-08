@@ -26,3 +26,18 @@ module Datadog
           end
 
           def self.compatible?
+            super && version >= MINIMUM_VERSION
+          end
+
+          def new_configuration
+            Configuration::Settings.new
+          end
+
+          def patcher
+            Patcher
+          end
+        end
+      end
+    end
+  end
+end
