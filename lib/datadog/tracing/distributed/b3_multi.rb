@@ -67,4 +67,6 @@ module Datadog
           )
         end
       end
-  
+    end
+  end
+end
