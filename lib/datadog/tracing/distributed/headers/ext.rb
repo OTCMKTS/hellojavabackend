@@ -15,4 +15,20 @@ module Datadog
           # Distributed trace-level tags
           HTTP_HEADER_TAGS = 'x-datadog-tags'
 
-          # B3 k
+          # B3 keys used for distributed tracing.
+          # @see https://github.com/openzipkin/b3-propagation
+          B3_HEADER_TRACE_ID = 'x-b3-traceid'
+          B3_HEADER_SPAN_ID = 'x-b3-spanid'
+          B3_HEADER_SAMPLED = 'x-b3-sampled'
+          B3_HEADER_SINGLE = 'b3'
+
+          # gRPC metadata keys for distributed tracing. https://github.com/grpc/grpc-go/blob/v1.10.x/Documentation/grpc-metadata.md
+          GRPC_METADATA_TRACE_ID = 'x-datadog-trace-id'
+          GRPC_METADATA_PARENT_ID = 'x-datadog-parent-id'
+          GRPC_METADATA_SAMPLING_PRIORITY = 'x-datadog-sampling-priority'
+          GRPC_METADATA_ORIGIN = 'x-datadog-origin'
+        end
+      end
+    end
+  end
+end
