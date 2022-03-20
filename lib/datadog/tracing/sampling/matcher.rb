@@ -29,4 +29,38 @@ module Datadog
 
         attr_reader :name, :service
 
-        # @param name [String,Regexp,Proc] Matcher for case equality (===) with
+        # @param name [String,Regexp,Proc] Matcher for case equality (===) with the trace name,
+        #             defaults to always match
+        # @param service [String,Regexp,Proc] Matcher for case equality (===) with the service name,
+        #                defaults to always match
+        def initialize(name: MATCH_ALL, service: MATCH_ALL)
+          super()
+          @name = name
+          @service = service
+        end
+
+        def match?(trace)
+          name === trace.name && service === trace.service
+        end
+      end
+
+      # A {Datadog::Tracing::Sampling::Matcher} that allows for arbitrary trace matching
+      # based on the return value of a provided block.
+      # @public_api
+      class ProcMatcher < Matcher
+        attr_reader :block
+
+        # @yield [name, service] Provides trace name and service to the block
+        # @yieldreturn [Boolean] Whether the trace conforms to this matcher
+        def initialize(&block)
+          super()
+          @block = block
+        end
+
+        def match?(trace)
+          block.call(trace.name, trace.service)
+        end
+      end
+    end
+  end
+end
