@@ -93,4 +93,122 @@ module Datadog
 
         @service_entry = service_entry
 
-        # Mark with the service entry span metric
+        # Mark with the service entry span metric, if applicable
+        set_metric(Metadata::Ext::TAG_TOP_LEVEL, 1.0) if service_entry
+      end
+
+      # Return whether the duration is started or not
+      def started?
+        !@start_time.nil?
+      end
+
+      # Return whether the duration is stopped or not.
+      def stopped?
+        !@end_time.nil?
+      end
+      alias :finished? :stopped?
+
+      def duration
+        return @duration if @duration
+        return @end_time - @start_time if @start_time && @end_time
+      end
+
+      def set_error(e)
+        @status = Metadata::Ext::Errors::STATUS
+        super
+      end
+
+      # Spans with the same ID are considered the same span
+      def ==(other)
+        other.instance_of?(Span) &&
+          @id == other.id
+      end
+
+      # Return a string representation of the span.
+      def to_s
+        "Span(name:#{@name},sid:#{@id},tid:#{@trace_id},pid:#{@parent_id})"
+      end
+
+      # Return the hash representation of the current span.
+      # TODO: Change this to reflect attributes when serialization
+      # isn't handled by this method.
+      def to_hash
+        h = {
+          error: @status,
+          meta: @meta,
+          metrics: @metrics,
+          name: @name,
+          parent_id: @parent_id,
+          resource: @resource,
+          service: @service,
+          span_id: @id,
+          trace_id: @trace_id,
+          type: @type
+        }
+
+        if stopped?
+          h[:start] = start_time_nano
+          h[:duration] = duration_nano
+        end
+
+        h
+      end
+
+      # Return a human readable version of the span
+      def pretty_print(q)
+        start_time = (self.start_time.to_f * 1e9).to_i
+        end_time = (self.end_time.to_f * 1e9).to_i
+        q.group 0 do
+          q.breakable
+          q.text "Name: #{@name}\n"
+          q.text "Span ID: #{@id}\n"
+          q.text "Parent ID: #{@parent_id}\n"
+          q.text "Trace ID: #{@trace_id}\n"
+          q.text "Type: #{@type}\n"
+          q.text "Service: #{@service}\n"
+          q.text "Resource: #{@resource}\n"
+          q.text "Error: #{@status}\n"
+          q.text "Start: #{start_time}\n"
+          q.text "End: #{end_time}\n"
+          q.text "Duration: #{duration.to_f}\n"
+          q.group(2, 'Tags: [', "]\n") do
+            q.breakable
+            q.seplist @meta.each do |key, value|
+              q.text "#{key} => #{value}"
+            end
+          end
+          q.group(2, 'Metrics: [', ']') do
+            q.breakable
+            q.seplist @metrics.each do |key, value|
+              q.text "#{key} => #{value}"
+            end
+          end
+        end
+      end
+
+      private
+
+      # Used for serialization
+      # @return [Integer] in nanoseconds since Epoch
+      def start_time_nano
+        @start_time.to_i * 1000000000 + @start_time.nsec
+      end
+
+      # Used for serialization
+      # @return [Integer] in nanoseconds since Epoch
+      def duration_nano
+        (duration * 1e9).to_i
+      end
+
+      # https://docs.datadoghq.com/tracing/visualization/#service-entry-span
+      # A span is a service entry span when it is the entrypoint method for a request to a service.
+      # You can visualize this within Datadog APM when the color of the immediate parent on a flame graph is a different
+      # color. Services are also listed on the right when viewing a flame graph.
+      #
+      # @return [Boolean] `true` if the span is a serivce entry span
+      def service_entry?
+        @service_entry == true
+      end
+    end
+  end
+end
