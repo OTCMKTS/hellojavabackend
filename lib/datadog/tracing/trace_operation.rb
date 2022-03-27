@@ -409,4 +409,66 @@ module Datadog
           # Deactivate the span, re-activate parent.
           deactivate_span!(span_op)
 
-      
+          # Set finished, to signal root span has completed.
+          @finished = true if span_op == root_span
+
+          # Update active span count
+          @active_span_count -= 1
+
+          # Publish :span_finished event
+          events.span_finished.publish(span, self)
+
+          # Publish :trace_finished event
+          events.trace_finished.publish(self) if finished?
+        rescue StandardError => e
+          Datadog.logger.debug { "Error finishing span on trace: #{e} Backtrace: #{e.backtrace.first(3)}" }
+        end
+      end
+
+      # Track the root span
+      def set_root_span!(span)
+        return if span.nil? || root_span
+
+        @root_span = span
+      end
+
+      def build_trace(spans, partial = false)
+        TraceSegment.new(
+          spans,
+          agent_sample_rate: @agent_sample_rate,
+          hostname: @hostname,
+          id: @id,
+          lang: Core::Environment::Identity.lang,
+          origin: @origin,
+          process_id: Core::Environment::Identity.pid,
+          rate_limiter_rate: @rate_limiter_rate,
+          rule_sample_rate: @rule_sample_rate,
+          runtime_id: Core::Environment::Identity.id,
+          sample_rate: @sample_rate,
+          sampling_priority: @sampling_priority,
+          name: name,
+          resource: resource,
+          service: service,
+          tags: meta,
+          metrics: metrics,
+          root_span_id: !partial ? root_span && root_span.id : nil
+        )
+      end
+
+      # Returns tracer tags that will be propagated if this span's context
+      # is exported through {.to_digest}.
+      # @return [Hash] key value pairs of distributed tags
+      def distributed_tags
+        meta.select { |name, _| name.start_with?(Metadata::Ext::Distributed::TAGS_PREFIX) }
+      end
+
+      def reset
+        @root_span = nil
+        @active_span = nil
+        @active_span_count = 0
+        @finished = false
+        @spans = []
+      end
+    end
+  end
+end
