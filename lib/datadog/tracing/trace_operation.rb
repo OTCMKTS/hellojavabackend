@@ -267,4 +267,146 @@ module Datadog
 
       # Returns a set of trace headers used for continuing traces.
       # Used for propagation across execution contexts.
-      # Data should reflect the active s
+      # Data should reflect the active state of the trace.
+      def to_digest
+        # Resolve current span ID
+        span_id = @active_span && @active_span.id
+        span_id ||= @parent_span_id unless finished?
+
+        TraceDigest.new(
+          span_id: span_id,
+          span_name: (@active_span && @active_span.name),
+          span_resource: (@active_span && @active_span.resource),
+          span_service: (@active_span && @active_span.service),
+          span_type: (@active_span && @active_span.type),
+          trace_distributed_tags: distributed_tags,
+          trace_hostname: @hostname,
+          trace_id: @id,
+          trace_name: name,
+          trace_origin: @origin,
+          trace_process_id: Core::Environment::Identity.pid,
+          trace_resource: resource,
+          trace_runtime_id: Core::Environment::Identity.id,
+          trace_sampling_priority: @sampling_priority,
+          trace_service: service,
+        ).freeze
+      end
+
+      # Returns a copy of this trace suitable for forks (w/o spans.)
+      # Used for continuation of traces across forks.
+      def fork_clone
+        self.class.new(
+          agent_sample_rate: @agent_sample_rate,
+          events: (@events && @events.dup),
+          hostname: (@hostname && @hostname.dup),
+          id: @id,
+          max_length: @max_length,
+          name: (name && name.dup),
+          origin: (@origin && @origin.dup),
+          parent_span_id: (@active_span && @active_span.id) || @parent_span_id,
+          rate_limiter_rate: @rate_limiter_rate,
+          resource: (resource && resource.dup),
+          rule_sample_rate: @rule_sample_rate,
+          sample_rate: @sample_rate,
+          sampled: @sampled,
+          sampling_priority: @sampling_priority,
+          service: (service && service.dup),
+          tags: meta.dup,
+          metrics: metrics.dup
+        )
+      end
+
+      # Callback behavior
+      class Events
+        include Tracing::Events
+
+        attr_reader \
+          :span_before_start,
+          :span_finished,
+          :trace_finished
+
+        def initialize
+          @span_before_start = SpanBeforeStart.new
+          @span_finished = SpanFinished.new
+          @trace_finished = TraceFinished.new
+        end
+
+        # Triggered before a span starts.
+        class SpanBeforeStart < Tracing::Event
+          def initialize
+            super(:span_before_start)
+          end
+        end
+
+        # Triggered when a span finishes, regardless of error.
+        class SpanFinished < Tracing::Event
+          def initialize
+            super(:span_finished)
+          end
+        end
+
+        # Triggered when the trace finishes, regardless of error.
+        class TraceFinished < Tracing::Event
+          def initialize
+            super(:trace_finished)
+            @deactivate_trace_subscribed = false
+          end
+
+          def deactivate_trace_subscribed?
+            @deactivate_trace_subscribed
+          end
+
+          def subscribe_deactivate_trace(&block)
+            @deactivate_trace_subscribed = true
+            subscribe(&block)
+          end
+        end
+      end
+
+      private
+
+      attr_reader \
+        :events,
+        :root_span
+
+      def activate_span!(span_op)
+        parent = @active_span
+
+        span_op.send(:parent=, parent) unless parent.nil?
+
+        @active_span = span_op
+
+        set_root_span!(span_op) unless root_span
+      end
+
+      def deactivate_span!(span_op)
+        # Set parent to closest unfinished ancestor span.
+        # Prevents wrong span from being set as the active span
+        # when spans finish out of order.
+        span_op = span_op.send(:parent) while !span_op.nil? && span_op.finished?
+        @active_span = span_op
+      end
+
+      def start_span(span_op)
+        begin
+          activate_span!(span_op)
+
+          # Update active span count
+          @active_span_count += 1
+
+          # Publish :span_before_start event
+          events.span_before_start.publish(span_op, self)
+        rescue StandardError => e
+          Datadog.logger.debug { "Error starting span on trace: #{e} Backtrace: #{e.backtrace.first(3)}" }
+        end
+      end
+
+      def finish_span(span, span_op, parent)
+        begin
+          # Save finished span & root span
+          @spans << span unless span.nil?
+
+          # Deactivate the span, re-activate parent.
+          deactivate_span!(span_op)
+
+      
