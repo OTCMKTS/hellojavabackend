@@ -111,4 +111,83 @@ module Datadog
         #       Polling --> Async --> IntervalLoop --> AsyncTraceWriter --> TraceWriter
         #
         # WARNING: This method breaks the Liskov Substitution Principle -- TraceWriter#perform is spec'd to return the
-        # result from the writer, whereas this metho
+        # result from the writer, whereas this method always returns nil.
+        def perform(traces)
+          super(traces).tap do |responses|
+            loop_back_off! if responses.find(&:server_error?)
+          end
+
+          nil
+        end
+
+        def stop(*args)
+          buffer.close if running?
+          super
+        end
+
+        def enqueue(trace)
+          buffer.push(trace)
+        end
+
+        def dequeue
+          # Wrap results in Array because they are
+          # splatted as args against TraceWriter#perform.
+          [buffer.pop]
+        end
+
+        # Are there more traces to be processed next?
+        def work_pending?
+          !buffer.empty?
+        end
+
+        def async?
+          @async == true
+        end
+
+        def fork_policy=(policy)
+          # Translate to Workers::Async::Thread policy
+          thread_fork_policy =  case policy
+                                when Core::Workers::Async::Thread::FORK_POLICY_STOP
+                                  policy
+                                when FORK_POLICY_SYNC
+                                  # Stop the async thread because the writer
+                                  # will bypass and run synchronously.
+                                  Core::Workers::Async::Thread::FORK_POLICY_STOP
+                                else
+                                  Core::Workers::Async::Thread::FORK_POLICY_RESTART
+                                end
+
+          # Update thread fork policy
+          super(thread_fork_policy)
+
+          # Update local policy
+          @writer_fork_policy = policy
+        end
+
+        def after_fork
+          # In multiprocess environments, forks will share the same buffer until its written to.
+          # A.K.A. copy-on-write. We don't want forks to write traces generated from another process.
+          # Instead, we reset it after the fork. (Make sure any enqueue operations happen after this.)
+          self.buffer = TraceBuffer.new(@buffer_size)
+
+          # Switch to synchronous mode if configured to do so.
+          # In some cases synchronous writing is preferred because the fork will be short lived.
+          @async = false if @writer_fork_policy == FORK_POLICY_SYNC
+        end
+
+        # WARNING: This method breaks the Liskov Substitution Principle -- TraceWriter#write is spec'd to return the
+        # result from the writer, whereas this method returns something else when running in async mode.
+        def write(trace)
+          # Start worker thread. If the process has forked, it will trigger #after_fork to
+          # reconfigure the worker accordingly.
+          # NOTE: It's important we do this before queuing or it will drop the current trace,
+          #       because #after_fork resets the buffer.
+          perform
+
+          # Queue the trace if running asynchronously, otherwise short-circuit and write it directly.
+          async? ? enqueue(trace) : write_traces([trace])
+        end
+      end
+    end
+  end
+end
