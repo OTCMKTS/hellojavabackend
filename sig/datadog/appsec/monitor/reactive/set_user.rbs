@@ -1,0 +1,10 @@
+module Datadog
+  module AppSec
+    module Monitor
+      module Reactive
+        module SetUser
+          ADDRESSES: ::Array[::String]
+
+          def self.publish: (untyped op, Datadog::AppSec::Instrumentation::Gateway::User user) -> untyped
+
+          def self.

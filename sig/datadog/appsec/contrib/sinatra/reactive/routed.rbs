@@ -1,12 +1,12 @@
 module Datadog
   module AppSec
     module Contrib
-      module Rails
+      module Sinatra
         module Reactive
-          module Action
+          module Routed
             ADDRESSES: ::Array[::String]
 
-            def self.publish: (untyped op, Datadog::AppSec::Contrib::Rails::Gateway::Request request) -> untyped
+            def self.publish: (untyped op, ::Array[Datadog::AppSec::Instrumentation::Gateway::Argument] data) -> untyped
 
             def self.subscribe: (untyped op, untyped waf_context) { (untyped) -> untyped } -> untyped
           end
