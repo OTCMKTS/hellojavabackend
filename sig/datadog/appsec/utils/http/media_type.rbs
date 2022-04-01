@@ -1,0 +1,12 @@
+module Datadog
+  module AppSec
+    module Utils
+      module HTTP
+        class MediaType
+          class ParseError < ::StandardError
+          end
+
+          WILDCARD: ::String
+          TOKEN_RE: ::Regexp
+          PARAMETER_RE: ::Regexp
+     
