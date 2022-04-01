@@ -1,16 +1,12 @@
 module Datadog
   module AppSec
     module Contrib
-      module Rack
+      module Rails
         module Gateway
           module Watcher
             def self.watch: () -> untyped
 
-            def self.watch_request: (?Datadog::AppSec::Instrumentation::Gateway gateway) -> untyped
-
-            def self.watch_response: (?Datadog::AppSec::Instrumentation::Gateway gateway) -> untyped
-
-            def self.watch_request_body: (?Datadog::AppSec::Instrumentation::Gateway gateway) -> untyped
+            def self.watch_request_action: (?Datadog::AppSec::Instrumentation::Gateway gateway) -> untyped
 
             private
 
