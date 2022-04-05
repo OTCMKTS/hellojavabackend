@@ -1,0 +1,112 @@
+module Datadog
+  module AppSec
+    module WAF
+      module LibDDWAF
+        class Error < StandardError
+          attr_reader ruleset_info: Hash[Symbol, untyped] | nil
+
+          def initialize: (::String msg, ?ruleset_info: Hash[Symbol, untyped]?) -> void
+        end
+
+        extend ::FFI::Library
+
+        def self.local_os: () -> ::String
+        def self.local_cpu: () -> ::String
+        def self.local_version: () -> (::String | nil)
+        def self.source_dir: () -> ::String
+        def self.vendor_dir: () -> ::String
+        def self.libddwaf_vendor_dir: () -> ::String
+        def self.shared_lib_triplet: (?version: ::String?) -> ::String
+        def self.libddwaf_dir: () -> ::String
+        def self.shared_lib_extname: () -> ::String
+        def self.shared_lib_path: () -> ::String
+
+        # version
+
+        def self.ddwaf_get_version: () -> ::String
+
+        # ddwaf::object data structure
+
+        DDWAF_OBJ_TYPE: ::FFI::Enum
+
+        class UInt32Ptr < ::FFI::Struct
+        end
+
+        class UInt64Ptr < ::FFI::Struct
+        end
+
+        class SizeTPtr < ::FFI::Struct
+        end
+
+        class ObjectValueUnion < ::FFI::Union
+        end
+
+        class Object < ::FFI::Struct
+        end
+
+        # setters
+
+        def self.ddwaf_object_invalid: (LibDDWAF::Object) -> ::FFI::Pointer
+        def self.ddwaf_object_string: (LibDDWAF::Object, ::String) -> ::FFI::Pointer
+        def self.ddwaf_object_stringl: (LibDDWAF::Object, ::String, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_stringl_nc: (LibDDWAF::Object, ::String, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_unsigned: (LibDDWAF::Object, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_signed: (LibDDWAF::Object, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_unsigned_force: (LibDDWAF::Object, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_signed_force: (LibDDWAF::Object, ::Integer) -> ::FFI::Pointer
+        def self.ddwaf_object_bool: (LibDDWAF::Object, bool) -> ::FFI::Pointer
+
+        def self.ddwaf_object_array: (LibDDWAF::Object) -> ::FFI::Pointer
+        def self.ddwaf_object_array_add: (LibDDWAF::Object, LibDDWAF::Object) -> bool
+
+        def self.ddwaf_object_map: (LibDDWAF::Object) -> ::FFI::Pointer
+        def self.ddwaf_object_map_add: (LibDDWAF::Object, ::String, LibDDWAF::Object) -> bool
+        def self.ddwaf_object_map_addl: (LibDDWAF::Object, ::String, ::Integer, LibDDWAF::Object) -> bool
+        def self.ddwaf_object_map_addl_nc: (LibDDWAF::Object, ::String, ::Integer, LibDDWAF::Object) -> bool
+
+        # getters
+
+        def self.ddwaf_object_type: (LibDDWAF::Object) -> ::FFI::Enum
+        def self.ddwaf_object_size: (LibDDWAF::Object) -> ::Integer
+        def self.ddwaf_object_length: (LibDDWAF::Object) -> ::Integer
+        def self.ddwaf_object_get_key: (LibDDWAF::Object, SizeTPtr) -> ::String
+        def self.ddwaf_object_get_string: (LibDDWAF::Object, SizeTPtr) -> ::String
+        def self.ddwaf_object_get_unsigned: (LibDDWAF::Object, SizeTPtr) -> ::Integer
+        def self.ddwaf_object_get_signed: (LibDDWAF::Object, SizeTPtr) -> ::Integer
+        def self.ddwaf_object_get_index: (LibDDWAF::Object, ::Integer) -> LibDDWAF::Object
+
+        # freeers
+
+        def self.ddwaf_object_free: (LibDDWAF::Object) -> void
+
+        ObjectFree: ::FFI::Function
+        ObjectNoFree: ::FFI::Pointer
+
+        # main handle
+
+        class Config < ::FFI::Struct
+          class Limits < ::FFI::Struct
+          end
+
+          class Obfuscator < ::FFI::Struct
+          end
+        end
+
+        class RuleSetInfo < ::FFI::Struct
+        end
+
+        RuleSetInfoNone: ::Datadog::AppSec::WAF::LibDDWAF::RuleSetInfo
+
+        def self.ddwaf_ruleset_info_free: (RuleSetInfo) -> void
+
+        def self.ddwaf_init: (top, Config, RuleSetInfo) -> ::FFI::Pointer
+        def self.ddwaf_destroy: (::FFI::Pointer) -> void
+
+        def self.ddwaf_required_addresses: (::FFI::Pointer, UInt32Ptr) -> ::FFI::Pointer
+        def self.ddwaf_rule_data_ids: (::FFI::Pointer, UInt32Ptr) -> ::FFI::Pointer
+
+        # updating
+
+        DDWAF_RET_CODE: ::FFI::Enum
+
+        def self.ddwaf_up

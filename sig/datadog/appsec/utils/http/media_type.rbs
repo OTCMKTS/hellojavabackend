@@ -9,4 +9,16 @@ module Datadog
           WILDCARD: ::String
           TOKEN_RE: ::Regexp
           PARAMETER_RE: ::Regexp
-     
+          MEDIA_TYPE_RE: ::Regexp
+
+          attr_reader type: ::String
+          attr_reader subtype: ::String
+          attr_reader parameters: ::Hash[::String, ::String]
+
+          def initialize: (::String) -> void
+          def to_s: () -> ::String
+        end
+      end
+    end
+  end
+end
