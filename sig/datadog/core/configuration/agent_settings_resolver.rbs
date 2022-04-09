@@ -1,0 +1,6 @@
+module Datadog
+  module Core
+    module Configuration
+      class AgentSettingsResolver
+        class AgentSettings < ::Struct[untyped]
+          def initialize: (adapter: untyped, ssl: untyped, hostname: untyped, port: untyped, uds_path: untyped, timeout_seconds: untyped, deprecated_for_removal_transpor

@@ -109,4 +109,122 @@ module Datadog
 
         DDWAF_RET_CODE: ::FFI::Enum
 
-        def self.ddwaf_up
+        def self.ddwaf_update_rule_data: (::FFI::Pointer, LibDDWAF::Object) -> ::Symbol
+        def self.ddwaf_toggle_rules: (::FFI::Pointer, LibDDWAF::Object) -> ::Symbol
+
+        # running
+
+        def self.ddwaf_context_init: (::FFI::Pointer) -> ::FFI::Pointer
+        def self.ddwaf_context_destroy: (::FFI::Pointer) -> void
+
+        class ResultActions < ::FFI::Struct
+        end
+
+        class Result < ::FFI::Struct
+        end
+
+        def self.ddwaf_run: (::FFI::Pointer, Object, Result, ::Integer) -> ::Symbol
+        def self.ddwaf_result_free: (Result) -> void
+
+        # logging
+
+        DDWAF_LOG_LEVEL: ::FFI::Enum
+
+        type ddwaf_log_level = ::Symbol
+
+        # TODO: signature is as below but steep 1.1 does not yet support method/proc/block mapping
+        # type ddwaf_log_cb = ^(ddwaf_log_level, ::String, ::String, ::Integer, ::FFI::Pointer, ::Integer) -> void
+        type ddwaf_log_cb = ::Method | ::Proc
+        def self.ddwaf_set_log_cb: (ddwaf_log_cb, ddwaf_log_level) -> bool
+
+        DEFAULT_MAX_CONTAINER_SIZE: ::Integer
+        DEFAULT_MAX_CONTAINER_DEPTH: ::Integer
+        DEFAULT_MAX_STRING_LENGTH: ::Integer
+
+        DDWAF_MAX_CONTAINER_SIZE: ::Integer
+        DDWAF_MAX_CONTAINER_DEPTH: ::Integer
+        DDWAF_MAX_STRING_LENGTH: ::Integer
+
+        DDWAF_RUN_TIMEOUT: ::Integer
+      end
+
+      def self.version: () -> ::String
+
+      type data = String | Symbol | Integer | Float | TrueClass | FalseClass | Array[data] | Hash[String | Symbol, data] | nil
+
+      def self.ruby_to_object: (data val, ?max_container_size: ::Integer?, ?max_container_depth: ::Integer?, ?max_string_length: ::Integer?, ?coerce: bool?) -> ::Datadog::AppSec::WAF::LibDDWAF::Object
+      def self.object_to_ruby: (::Datadog::AppSec::WAF::LibDDWAF::Object obj) -> data
+
+      self.@logger: ::Logger
+      self.@log_callback: LibDDWAF::ddwaf_log_cb
+
+      def self.log_callback: (LibDDWAF::ddwaf_log_level, ::String, ::String, ::Integer, ::FFI::Pointer, ::Integer) -> void
+      def self.logger: () -> ::Logger
+      def self.logger=: (::Logger logger) -> void
+
+      RESULT_CODE: ::Hash[::Symbol, ::Symbol]
+
+      class Handle
+        attr_reader handle_obj: ::FFI::Pointer
+        attr_reader ruleset_info: Hash[Symbol, untyped]
+
+        def initialize: (data rule, ?limits: ::Hash[::Symbol, ::Integer], ?obfuscator: ::Hash[::Symbol, ::String]) -> void
+        def finalize: () -> untyped
+        def required_addresses: () -> ::Array[::String]
+        def update_rule_data: (::Array[untyped]) -> ::Symbol
+        def toggle_rules: (::Hash[::String, bool]) -> ::Symbol
+
+        private
+
+        @valid: bool
+
+        def validate!: () -> void
+        def invalidate!: () -> void
+        def valid?: () -> (nil | bool)
+        def valid!: () -> void
+
+        @retained: Array[untyped]
+
+        def retained: () -> Array[untyped]
+        def retain: (top object) -> void
+        def release: (top object) -> void
+      end
+
+      type result_data = Array[untyped] | nil
+
+      class Result
+        attr_reader status: ::Symbol
+        attr_reader data: untyped
+        attr_reader total_runtime: ::Float
+        attr_reader timeout: bool
+        attr_reader actions: ::Array[::String]
+
+        def initialize: (::Symbol, result_data, ::Float, bool, ::Array[::String]) -> void
+      end
+
+      class Context
+        attr_reader context_obj: ::FFI::Pointer
+
+        def initialize: (Handle handle) -> void
+        def finalize: () -> void
+
+        def run: (data input, ?::Integer timeout) -> ::Array[top]
+
+        private
+
+        @valid: bool
+
+        def validate!: () -> void
+        def invalidate!: () -> void
+        def valid?: () -> (nil | bool)
+        def valid!: () -> void
+
+        @retained: Array[untyped]
+
+        def retained: () -> Array[untyped]
+        def retain: (top object) -> void
+        def release: (top object) -> void
+      end
+    end
+  end
+end
