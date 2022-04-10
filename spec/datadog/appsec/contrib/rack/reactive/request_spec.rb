@@ -1,26 +1,30 @@
+
 # frozen_string_literal: true
 
 require 'datadog/appsec/spec_helper'
 require 'datadog/appsec/reactive/operation'
 require 'datadog/appsec/contrib/rack/gateway/request'
-require 'datadog/appsec/contrib/rack/reactive/request_body'
+require 'datadog/appsec/contrib/rack/reactive/request'
 require 'rack'
 
-RSpec.describe Datadog::AppSec::Contrib::Rack::Reactive::RequestBody do
+RSpec.describe Datadog::AppSec::Contrib::Rack::Reactive::Request do
   let(:operation) { Datadog::AppSec::Reactive::Operation.new('test') }
   let(:request) do
     Datadog::AppSec::Contrib::Rack::Gateway::Request.new(
       Rack::MockRequest.env_for(
         'http://example.com:8080/?a=foo',
-        { method: 'POST', params: { 'foo' => 'bar' } }
+        { 'REMOTE_ADDR' => '10.10.10.10', 'HTTP_CONTENT_TYPE' => 'text/html' }
       )
     )
   end
 
   describe '.publish' do
-    it 'propagates request body attributes to the operation' do
-      expect(operation).to receive(:publish).with('request.body', { 'foo' => 'bar' })
-
+    it 'propagates request attributes to the operation' do
+      expect(operation).to receive(:publish).with('request.query', [{ 'a' => 'foo' }])
+      expect(operation).to receive(:publish).with('request.headers', { 'content-type' => 'text/html' })
+      expect(operation).to receive(:publish).with('request.uri.raw', 'http://example.com:8080/?a=foo')
+      expect(operation).to receive(:publish).with('request.cookies', {})
+      expect(operation).to receive(:publish).with('request.client_ip', '10.10.10.10')
       described_class.publish(operation, request)
     end
   end
@@ -30,7 +34,13 @@ RSpec.describe Datadog::AppSec::Contrib::Rack::Reactive::RequestBody do
 
     context 'not all addresses have been published' do
       it 'does not call the waf context' do
-        expect(operation).to receive(:subscribe).with('request.body').and_call_original
+        expect(operation).to receive(:subscribe).with(
+          'request.headers',
+          'request.uri.raw',
+          'request.query',
+          'request.cookies',
+          'request.client_ip'
+        ).and_call_original
         expect(waf_context).to_not receive(:run)
         described_class.subscribe(operation, waf_context)
       end
@@ -40,7 +50,14 @@ RSpec.describe Datadog::AppSec::Contrib::Rack::Reactive::RequestBody do
       it 'does call the waf context with the right arguments' do
         expect(operation).to receive(:subscribe).and_call_original
 
-        expected_waf_arguments = { 'server.request.body' => { 'foo' => 'bar' } }
+        expected_waf_arguments = {
+          'server.request.cookies' => {},
+          'server.request.query' => [{ 'a' => 'foo' }],
+          'server.request.uri.raw' => 'http://example.com:8080/?a=foo',
+          'server.request.headers' => { 'content-type' => 'text/html' },
+          'server.request.headers.no_cookies' => { 'content-type' => 'text/html' },
+          'http.client_ip' => '10.10.10.10'
+        }
 
         waf_result = double(:waf_result, status: :ok, timeout: false)
         expect(waf_context).to receive(:run).with(
