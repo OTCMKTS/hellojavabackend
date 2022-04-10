@@ -71,4 +71,25 @@ RSpec.describe Datadog::AppSec::Contrib::Rack::Gateway::Request do
   end
 
   describe '#form_hash' do
-    context '
+    context 'GET request' do
+      it 'returns nil' do
+        expect(request.form_hash).to be_nil
+      end
+    end
+
+    context 'POST request' do
+      let(:request) do
+        described_class.new(
+          Rack::MockRequest.env_for(
+            'http://example.com:8080/?a=foo',
+            { method: 'POST', input: 'name=john', 'REMOTE_ADDR' => '10.10.10.10' }
+          )
+        )
+      end
+
+      it 'returns information' do
+        expect(request.form_hash).to eq({ 'name' => 'john' })
+      end
+    end
+  end
+end
