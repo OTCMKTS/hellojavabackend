@@ -17,4 +17,9 @@ module Datadog
       attr_reader subscriptions: untyped
 
       def initialize: (untyped name) -> void
-      def subscribe: () ?{ () -> unt
+      def subscribe: () ?{ () -> untyped } -> untyped
+      def unsubscribe_all!: () -> true
+      def publish: (*untyped args) -> true
+    end
+  end
+end
