@@ -113,4 +113,127 @@ RSpec.describe 'Sinatra integration tests' do
     Datadog.registry[:sinatra].reset_configuration!
   end
 
- 
+  context 'for an application' do
+    # TODO: also test without Tracing: it should run without trace transport
+
+    let(:middlewares) { [] }
+
+    let(:app) do
+      app_routes = routes
+      app_middlewares = middlewares
+
+      Class.new(Sinatra::Application) do
+        app_middlewares.each { |m| use m }
+        instance_exec(&app_routes)
+      end
+    end
+
+    let(:triggers) do
+      json = trace.send(:meta)['_dd.appsec.json']
+
+      JSON.parse(json).fetch('triggers', []) if json
+    end
+
+    let(:remote_addr) { '127.0.0.1' }
+    let(:client_ip) { remote_addr }
+
+    let(:span) { rack_span }
+
+    shared_examples 'a GET 200 span' do
+      it { expect(span.get_tag('http.method')).to eq('GET') }
+      it { expect(span.get_tag('http.status_code')).to eq('200') }
+      it { expect(span.status).to eq(0) }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it { expect(span.get_tag('http.method')).to eq('GET') }
+        it { expect(span.get_tag('http.status_code')).to eq('200') }
+        it { expect(span.status).to eq(0) }
+      end
+    end
+
+    shared_examples 'a GET 403 span' do
+      it { expect(span.get_tag('http.method')).to eq('GET') }
+      it { expect(span.get_tag('http.status_code')).to eq('403') }
+      it { expect(span.status).to eq(0) }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it { expect(span.get_tag('http.method')).to eq('GET') }
+        it { expect(span.get_tag('http.status_code')).to eq('200') }
+        it { expect(span.status).to eq(0) }
+      end
+    end
+
+    shared_examples 'a GET 404 span' do
+      it { expect(span.get_tag('http.method')).to eq('GET') }
+      it { expect(span.get_tag('http.status_code')).to eq('404') }
+      it { expect(span.status).to eq(0) }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it { expect(span.get_tag('http.method')).to eq('GET') }
+        it { expect(span.get_tag('http.status_code')).to eq('404') }
+        it { expect(span.status).to eq(0) }
+      end
+    end
+
+    shared_examples 'a POST 200 span' do
+      it { expect(span.get_tag('http.method')).to eq('POST') }
+      it { expect(span.get_tag('http.status_code')).to eq('200') }
+      it { expect(span.status).to eq(0) }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it { expect(span.get_tag('http.method')).to eq('POST') }
+        it { expect(span.get_tag('http.status_code')).to eq('200') }
+        it { expect(span.status).to eq(0) }
+      end
+    end
+
+    shared_examples 'a POST 403 span' do
+      it { expect(span.get_tag('http.method')).to eq('POST') }
+      it { expect(span.get_tag('http.status_code')).to eq('403') }
+      it { expect(span.status).to eq(0) }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it { expect(span.get_tag('http.method')).to eq('POST') }
+        it { expect(span.get_tag('http.status_code')).to eq('200') }
+        it { expect(span.status).to eq(0) }
+      end
+    end
+
+    shared_examples 'a trace without AppSec tags' do
+      it { expect(trace.send(:metrics)['_dd.appsec.enabled']).to be_nil }
+      it { expect(trace.send(:meta)['_dd.runtime_family']).to be_nil }
+      it { expect(trace.send(:meta)['_dd.appsec.waf.version']).to be_nil }
+      it { expect(span.send(:meta)['http.client_ip']).to eq nil }
+    end
+
+    shared_examples 'a trace with AppSec tags' do
+      it { expect(trace.send(:metrics)['_dd.appsec.enabled']).to eq(1.0) }
+      it { expect(trace.send(:meta)['_dd.runtime_family']).to eq('ruby') }
+      it { expect(trace.send(:meta)['_dd.appsec.waf.version']).to match(/^\d+\.\d+\.\d+/) }
+      it { expect(span.send(:meta)['http.client_ip']).to eq client_ip }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it_behaves_like 'a trace without AppSec tags'
+      end
+    end
+
+    shared_examples 'a trace without AppSec events' do
+      it { expect(spans.select { |s| s.get_tag('appsec.event') }).to be_empty }
+      it { expect(trace.send(:meta)['_dd.appsec.triggers']).to be_nil }
+    end
+
+    shared_examples 'a trace with AppSec events' do
+      it { expect(spans.select { |s| s.get_tag('appsec.event') }).to_not be_empty }
+      it { expect(trace.send(:meta)['_dd.appsec.json']).to 
