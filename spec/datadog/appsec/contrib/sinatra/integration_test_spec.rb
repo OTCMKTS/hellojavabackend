@@ -236,4 +236,155 @@ RSpec.describe 'Sinatra integration tests' do
 
     shared_examples 'a trace with AppSec events' do
       it { expect(spans.select { |s| s.get_tag('appsec.event') }).to_not be_empty }
-      it { expect(trace.send(:meta)['_dd.appsec.json']).to 
+      it { expect(trace.send(:meta)['_dd.appsec.json']).to be_a String }
+
+      context 'with appsec disabled' do
+        let(:appsec_enabled) { false }
+
+        it_behaves_like 'a trace without AppSec events'
+      end
+    end
+
+    context 'with a basic route' do
+      let(:routes) do
+        lambda do
+          get '/success' do
+            'ok'
+          end
+
+          post '/success' do
+            'ok'
+          end
+
+          get '/set_user' do
+            Datadog::Kit::Identity.set_user(Datadog::Tracing.active_trace, id: 'blocked-user-id')
+            'ok'
+          end
+        end
+      end
+
+      before do
+        response
+        expect(spans).to_not be_empty
+      end
+
+      describe 'GET request' do
+        subject(:response) { get url, params, env }
+
+        let(:url) { '/success' }
+        let(:params) { {} }
+        let(:headers) { {} }
+        let(:env) { { 'REMOTE_ADDR' => remote_addr }.merge!(headers) }
+
+        context 'with a non-event-triggering request' do
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a GET 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace without AppSec events'
+        end
+
+        context 'with an event-triggering request in headers' do
+          let(:headers) { { 'HTTP_USER_AGENT' => 'Nessus SOAP' } }
+
+          it { is_expected.to be_ok }
+          it { expect(triggers).to be_a Array }
+
+          it_behaves_like 'a GET 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+        end
+
+        context 'with an event-triggering request in query string' do
+          let(:params) { { q: '1 OR 1;' } }
+
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a GET 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+
+          context 'and a blocking rule' do
+            let(:appsec_ruleset) { crs_942_100 }
+
+            it { is_expected.to be_forbidden }
+
+            it_behaves_like 'a GET 403 span'
+            it_behaves_like 'a trace with AppSec tags'
+            it_behaves_like 'a trace with AppSec events'
+          end
+        end
+
+        context 'with an event-triggering request in route parameter' do
+          let(:routes) do
+            lambda do
+              get '/success/:id' do
+                'ok'
+              end
+            end
+          end
+
+          let(:url) { '/success/1%20OR%201;' }
+
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a GET 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+
+          context 'and a blocking rule' do
+            let(:appsec_ruleset) { crs_942_100 }
+
+            it { is_expected.to be_forbidden }
+
+            it_behaves_like 'a GET 403 span'
+            it_behaves_like 'a trace with AppSec tags'
+            it_behaves_like 'a trace with AppSec events'
+          end
+        end
+
+        context 'with an event-triggering request in IP' do
+          let(:client_ip) { '1.2.3.4' }
+          let(:appsec_ip_denylist) { [client_ip] }
+          let(:headers) { { 'HTTP_X_FORWARDED_FOR' => client_ip } }
+
+          it { is_expected.to be_forbidden }
+
+          it_behaves_like 'a GET 403 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+        end
+
+        context 'with an event-triggering response' do
+          let(:url) { '/admin.php' } # well-known scanned path
+
+          it { is_expected.to be_not_found }
+          it { expect(triggers).to be_a Array }
+
+          it_behaves_like 'a GET 404 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+        end
+
+        context 'with user blocking ID' do
+          let(:url) { '/set_user' }
+
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a GET 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace without AppSec events'
+
+          context 'with an event-triggering user ID' do
+            let(:appsec_user_id_denylist) { ['blocked-user-id'] }
+
+            it { is_expected.to be_forbidden }
+
+            it_behaves_like 'a GET 403 span'
+            it_behaves_like 'a trace with AppSec tags'
+            it_behaves_like 'a trace with AppSec events'
+          end
+        end
+      end
+
+      describe 'POST
