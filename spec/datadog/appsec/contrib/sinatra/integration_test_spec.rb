@@ -387,4 +387,81 @@ RSpec.describe 'Sinatra integration tests' do
         end
       end
 
-      describe 'POST
+      describe 'POST request' do
+        subject(:response) { post url, params, env }
+
+        let(:url) { '/success' }
+        let(:params) { {} }
+        let(:headers) { {} }
+        let(:env) { { 'REMOTE_ADDR' => remote_addr }.merge!(headers) }
+
+        context 'with a non-event-triggering request' do
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a POST 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace without AppSec events'
+        end
+
+        context 'with an event-triggering request in application/x-www-form-url-encoded body' do
+          let(:params) { { q: '1 OR 1;' } }
+
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a POST 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+
+          context 'and a blocking rule' do
+            let(:appsec_ruleset) { crs_942_100 }
+
+            it { is_expected.to be_forbidden }
+
+            it_behaves_like 'a POST 403 span'
+            it_behaves_like 'a trace with AppSec tags'
+            it_behaves_like 'a trace with AppSec events'
+          end
+        end
+
+        unless Gem.loaded_specs['rack-test'].version.to_s < '0.7'
+          context 'with an event-triggering request in multipart/form-data body' do
+            let(:params) { Rack::Test::Utils.build_multipart({ q: '1 OR 1;' }, true, true) }
+            let(:headers) { { 'CONTENT_TYPE' => "multipart/form-data; boundary=#{Rack::Test::MULTIPART_BOUNDARY}" } }
+
+            it { is_expected.to be_ok }
+
+            it_behaves_like 'a POST 200 span'
+            it_behaves_like 'a trace with AppSec tags'
+            it_behaves_like 'a trace with AppSec events'
+          end
+        end
+
+        context 'with an event-triggering request as JSON' do
+          let(:rack_contrib_body_parser) do
+            if defined?(Rack::JSONBodyParser)
+              Rack::JSONBodyParser
+            else
+              # fallback for old rack-contrib
+              Rack::PostBodyContentTypeParser
+            end
+          end
+
+          let(:middlewares) do
+            [
+              rack_contrib_body_parser,
+            ]
+          end
+
+          let(:params) { JSON.generate('q' => '1 OR 1;') }
+          let(:headers) { { 'CONTENT_TYPE' => 'application/json' } }
+
+          it { is_expected.to be_ok }
+
+          it_behaves_like 'a POST 200 span'
+          it_behaves_like 'a trace with AppSec tags'
+          it_behaves_like 'a trace with AppSec events'
+        end
+      end
+    end
+  end
+end
