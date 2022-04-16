@@ -24,4 +24,36 @@ RSpec.describe Datadog::AppSec::Utils::HTTP::MediaType do
     end
 
     context 'with invalid input' do
-      parse_error = described_class::P
+      parse_error = described_class::ParseError
+      expectations = {
+        'text/html ' => parse_error,
+        ' text/html' => parse_error,
+        'text /html' => parse_error,
+        'text/ html' => parse_error,
+        'text/plain;format = flowed' => parse_error,
+        'text/plain;format= flowed' => parse_error,
+        'text/plain;format =flowed' => parse_error,
+      }
+
+      expectations.each do |str, expected|
+        it "raises #{expected} with #{str.inspect}" do
+          expect { described_class.new(str) }.to raise_error(expected)
+        end
+      end
+    end
+  end
+
+  describe '#to_s' do
+    expectations = {
+      'text/html' => 'text/html',
+      'application/json' => 'application/json',
+      'text/plain;format=flowed' => 'text/plain;format=flowed',
+    }
+
+    expectations.each do |str, expected|
+      it "converts #{str.inspect} to #{expected.inspect}" do
+        expect(described_class.new(str).to_s).to eq expected
+      end
+    end
+  end
+end
