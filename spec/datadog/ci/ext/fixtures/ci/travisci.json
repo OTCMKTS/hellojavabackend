@@ -506,4 +506,20 @@
       "TRAVIS_COMMIT_MESSAGE": "travis-commit-message",
       "TRAVIS_JOB_WEB_URL": "travis-job-url",
       "TRAVIS_REPO_SLUG": "user/repo",
-      "TRAVIS_TAG": "origin/ta
+      "TRAVIS_TAG": "origin/tags/0.1.0"
+    },
+    {
+      "ci.job.url": "travis-job-url",
+      "ci.pipeline.id": "travis-pipeline-id",
+      "ci.pipeline.name": "user/repo",
+      "ci.pipeline.number": "travis-pipeline-number",
+      "ci.pipeline.url": "travis-pipeline-url",
+      "ci.provider.name": "travisci",
+      "ci.workspace_path": "/foo/bar",
+      "git.commit.message": "travis-commit-message",
+      "git.commit.sha": "travis-git-commit",
+      "git.repository_url": "https://github.com/user/repo.git",
+      "git.tag": "0.1.0"
+    }
+  ]
+]
