@@ -229,4 +229,136 @@ RSpec.describe Datadog::CI::Test do
         end
       end
 
-      context 'for the runtim
+      context 'for the runtime version' do
+        subject(:tag) do
+          set_tags!
+          span_op.get_tag(Datadog::CI::Ext::Test::TAG_RUNTIME_VERSION)
+        end
+
+        context 'with MRI', if: PlatformHelpers.mri? do
+          it { is_expected.to match(/^[23]\./) }
+        end
+
+        context 'with JRuby', if: PlatformHelpers.jruby? do
+          it { is_expected.to match(/^9\./) }
+        end
+
+        context 'with TruffleRuby', if: PlatformHelpers.truffleruby? do
+          it { is_expected.to match(/^2\d\./) }
+        end
+
+        it 'returns a valid string' do
+          is_expected.to be_a(String)
+        end
+      end
+    end
+  end
+
+  describe '::passed!' do
+    subject(:passed!) { described_class.passed!(span_op) }
+    let(:span_op) { instance_double(Datadog::Tracing::SpanOperation) }
+
+    before do
+      allow(span_op).to receive(:set_tag)
+      passed!
+    end
+
+    it do
+      expect(span_op)
+        .to have_received(:set_tag)
+        .with(
+          Datadog::CI::Ext::Test::TAG_STATUS,
+          Datadog::CI::Ext::Test::Status::PASS
+        )
+    end
+  end
+
+  describe '::failed!' do
+    let(:span_op) { instance_double(Datadog::Tracing::SpanOperation) }
+
+    before do
+      allow(span_op).to receive(:status=)
+      allow(span_op).to receive(:set_tag)
+      allow(span_op).to receive(:set_error)
+      failed!
+    end
+
+    shared_examples 'failed test span operation' do
+      it do
+        expect(span_op)
+          .to have_received(:status=)
+          .with(1)
+      end
+
+      it do
+        expect(span_op)
+          .to have_received(:set_tag)
+          .with(
+            Datadog::CI::Ext::Test::TAG_STATUS,
+            Datadog::CI::Ext::Test::Status::FAIL
+          )
+      end
+    end
+
+    context 'when no exception is given' do
+      subject(:failed!) { described_class.failed!(span_op) }
+
+      it_behaves_like 'failed test span operation'
+      it { expect(span_op).to_not have_received(:set_error) }
+    end
+
+    context 'when exception is given' do
+      subject(:failed!) { described_class.failed!(span_op, exception) }
+      let(:exception) { instance_double(StandardError) }
+
+      it_behaves_like 'failed test span operation'
+
+      it do
+        expect(span_op)
+          .to have_received(:set_error)
+          .with(exception)
+      end
+    end
+  end
+
+  describe '::skipped!' do
+    let(:span_op) { instance_double(Datadog::Tracing::SpanOperation) }
+
+    before do
+      allow(span_op).to receive(:set_tag)
+      allow(span_op).to receive(:set_error)
+      skipped!
+    end
+
+    shared_examples 'skipped test span operation' do
+      it do
+        expect(span_op)
+          .to have_received(:set_tag)
+          .with(
+            Datadog::CI::Ext::Test::TAG_STATUS,
+            Datadog::CI::Ext::Test::Status::SKIP
+          )
+      end
+    end
+
+    context 'when no exception is given' do
+      subject(:skipped!) { described_class.skipped!(span_op) }
+
+      it_behaves_like 'skipped test span operation'
+      it { expect(span_op).to_not have_received(:set_error) }
+    end
+
+    context 'when exception is given' do
+      subject(:skipped!) { described_class.skipped!(span_op, exception) }
+      let(:exception) { instance_double(StandardError) }
+
+      it_behaves_like 'skipped test span operation'
+
+      it do
+        expect(span_op)
+          .to have_received(:set_error)
+          .with(exception)
+      end
+    end
+  end
+end
