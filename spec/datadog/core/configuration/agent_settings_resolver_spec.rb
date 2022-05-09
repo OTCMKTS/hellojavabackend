@@ -207,4 +207,144 @@ RSpec.describe Datadog::Core::Configuration::AgentSettingsResolver do
       context 'when the port is specified as a string instead of a number' do
         let(:port_value_to_parse) { '1234' }
 
-        it '
+        it 'contacts the agent using the http adapter, using the custom port' do
+          expect(resolver).to have_attributes(**settings, port: 1234)
+        end
+      end
+
+      context 'when the port is an invalid string value' do
+        let(:port_value_to_parse) { 'kaboom' }
+
+        before do
+          allow(logger).to receive(:warn)
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Invalid value/)
+
+          resolver
+        end
+
+        it 'falls back to the defaults' do
+          expect(resolver).to have_attributes settings
+        end
+      end
+
+      context 'when the port is an invalid object' do
+        let(:port_value_to_parse) { Object.new }
+
+        before do
+          allow(logger).to receive(:warn)
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Invalid value/)
+
+          resolver
+        end
+
+        it 'falls back to the defaults' do
+          expect(resolver).to have_attributes settings
+        end
+      end
+    end
+
+    context 'when a custom port is specified via the DD_TRACE_AGENT_PORT environment variable' do
+      let(:environment) { { 'DD_TRACE_AGENT_PORT' => '1234' } }
+
+      it 'contacts the agent using the http adapter, using the custom port' do
+        expect(resolver).to have_attributes(**settings, port: 1234)
+      end
+
+      context 'when the custom port is invalid' do
+        let(:environment) { { 'DD_TRACE_AGENT_PORT' => 'this-is-an-invalid-port' } }
+
+        before do
+          allow(logger).to receive(:warn)
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Invalid value/)
+
+          resolver
+        end
+
+        it 'falls back to the defaults' do
+          expect(resolver).to have_attributes settings
+        end
+      end
+    end
+
+    context 'when a custom port is specified via code using "agent.port = "' do
+      before do
+        ddtrace_settings.agent.port = 1234
+      end
+
+      it 'contacts the agent using the http adapter, using the custom port' do
+        expect(resolver).to have_attributes(**settings, port: 1234)
+      end
+
+      it_behaves_like "parsing of port when it's not an integer" do
+        before do
+          ddtrace_settings.agent.port = port_value_to_parse
+        end
+      end
+    end
+
+    context 'when a custom port is specified via the DD_TRACE_AGENT_URL environment variable' do
+      let(:environment) { { 'DD_TRACE_AGENT_URL' => "http://#{hostname}:1234" } }
+
+      it 'contacts the agent using the http adapter, using the custom port' do
+        expect(resolver).to have_attributes(**settings, port: 1234)
+      end
+    end
+
+    context 'when a custom port is specified via code using "tracing.transport_options =" (positional args variant)' do
+      before do
+        ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, nil, 1234) }
+      end
+
+      it 'contacts the agent using the http adapter, using the custom port' do
+        expect(resolver).to have_attributes(**settings, port: 1234)
+      end
+
+      it_behaves_like "parsing of port when it's not an integer" do
+        before do
+          port = port_value_to_parse
+          ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, nil, port) }
+        end
+      end
+    end
+
+    context 'when a custom port is specified via code using "tracing.transport_options =" (keyword args variant)' do
+      before do
+        ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, port: 1234) }
+      end
+
+      it 'contacts the agent using the http adapter, using the custom port' do
+        expect(resolver).to have_attributes(**settings, port: 1234)
+      end
+
+      it_behaves_like "parsing of port when it's not an integer" do
+        before do
+          port = port_value_to_parse
+          ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, port: port) }
+        end
+      end
+    end
+
+    describe 'priority' do
+      let(:with_agent_port) { nil }
+      let(:with_trace_agent_url) { nil }
+      let(:with_trace_agent_port) { nil }
+      let(:environment) do
+        environment = {}
+
+        (environment['DD_TRACE_AGENT_URL'] = "http://custom-hostname:#{with_trace_agent_url}") if with_trace_agent_url
+        (environment['DD_TRACE_AGENT_PORT'] = with_trace_agent_port.to_s) if with_trace_agent_port
+
+        environment
+      end
+
+      before do
+        allow(
