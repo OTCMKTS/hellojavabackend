@@ -86,4 +86,125 @@ RSpec.describe Datadog::Core::Configuration::AgentSettingsResolver do
     end
 
     context 'when a custom hostname is specified via the DD_TRACE_AGENT_URL environment variable' do
-      let(:environment) { { 'D
+      let(:environment) { { 'DD_TRACE_AGENT_URL' => "http://custom-hostname:#{port}" } }
+
+      it 'contacts the agent using the http adapter, using the custom hostname' do
+        expect(resolver).to have_attributes(**settings, hostname: 'custom-hostname')
+      end
+    end
+
+    context 'when a custom hostname is specified via code using "tracing.transport_options =" (positional args variant)' do
+      before do
+        ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, 'custom-hostname') }
+      end
+
+      it 'contacts the agent using the http adapter, using the custom hostname' do
+        expect(resolver).to have_attributes(**settings, hostname: 'custom-hostname')
+      end
+    end
+
+    context 'when a custom hostname is specified via code using "tracing.transport_options =" (keyword args variant)' do
+      before do
+        ddtrace_settings.tracing.transport_options = proc { |t| t.adapter(:net_http, hostname: 'custom-hostname') }
+      end
+
+      it 'contacts the agent using the http adapter, using the custom hostname' do
+        expect(resolver).to have_attributes(**settings, hostname: 'custom-hostname')
+      end
+    end
+
+    describe 'priority' do
+      let(:with_transport_options) { nil }
+      let(:with_agent_host) { nil }
+      let(:with_trace_agent_url) { nil }
+      let(:with_environment_agent_host) { nil }
+      let(:environment) do
+        environment = {}
+
+        (environment['DD_TRACE_AGENT_URL'] = "http://#{with_trace_agent_url}:1234") if with_trace_agent_url
+        (environment['DD_AGENT_HOST'] = with_environment_agent_host) if with_environment_agent_host
+
+        environment
+      end
+
+      before do
+        allow(logger).to receive(:warn)
+        if with_transport_options
+          ddtrace_settings.tracing.transport_options =
+            proc { |t| t.adapter(:net_http, hostname: with_transport_options) }
+        end
+        (ddtrace_settings.agent.host = with_agent_host) if with_agent_host
+      end
+
+      context 'when tracing.transport_options, agent.host, DD_TRACE_AGENT_URL, DD_AGENT_HOST are provided' do
+        let(:with_transport_options) { 'custom-hostname-1' }
+        let(:with_agent_host) { 'custom-hostname-2' }
+        let(:with_trace_agent_url) { 'custom-hostname-3' }
+        let(:with_environment_agent_host) { 'custom-hostname-4' }
+
+        it 'prioritizes the tracing.transport_options' do
+          expect(resolver).to have_attributes(hostname: 'custom-hostname-1')
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+
+      context 'when agent.host, DD_TRACE_AGENT_URL, DD_AGENT_HOST are provided' do
+        let(:with_agent_host) { 'custom-hostname-2' }
+        let(:with_trace_agent_url) { 'custom-hostname-3' }
+        let(:with_environment_agent_host) { 'custom-hostname-4' }
+
+        it 'prioritizes the agent.port' do
+          expect(resolver).to have_attributes(hostname: 'custom-hostname-2')
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+
+      context 'when DD_TRACE_AGENT_URL, DD_AGENT_HOST are provided' do
+        let(:with_trace_agent_url) { 'custom-hostname-3' }
+        let(:with_environment_agent_host) { 'custom-hostname-4' }
+
+        it 'prioritizes the DD_TRACE_AGENT_URL' do
+          expect(resolver).to have_attributes(hostname: 'custom-hostname-3')
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+
+      # This somewhat duplicates some of the testing above, but it's still helpful to validate that the test is correct
+      # (otherwise it may pass due to bugs, not due to right priority being used)
+      context 'when only DD_AGENT_HOST is provided' do
+        let(:with_environment_agent_host) { 'custom-hostname-4' }
+
+        it 'uses the DD_AGENT_HOST' do
+          expect(resolver).to have_attributes(hostname: 'custom-hostname-4')
+        end
+
+        it 'does not log any warning' do
+          expect(logger).to_not receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+    end
+  end
+
+  describe 'http adapter port' do
+    shared_examples_for "parsing of port when it's not an integer" do
+      context 'when the port is specified as a string instead of a number' do
+        let(:port_value_to_parse) { '1234' }
+
+        it '
