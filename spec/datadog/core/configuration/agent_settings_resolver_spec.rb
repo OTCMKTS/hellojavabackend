@@ -347,4 +347,146 @@ RSpec.describe Datadog::Core::Configuration::AgentSettingsResolver do
       end
 
       before do
-        allow(
+        allow(logger).to receive(:warn)
+        (ddtrace_settings.agent.port = with_agent_port) if with_agent_port
+      end
+
+      context 'when all of agent.port, DD_TRACE_AGENT_URL, DD_TRACE_AGENT_PORT are provided' do
+        let(:with_agent_port) { 2 }
+        let(:with_trace_agent_url) { 3 }
+        let(:with_trace_agent_port) { 4 }
+
+        it 'prioritizes the agent.port' do
+          expect(resolver).to have_attributes(port: 2)
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+
+      context 'when DD_TRACE_AGENT_URL, DD_TRACE_AGENT_PORT are provided' do
+        let(:with_trace_agent_url) { 3 }
+        let(:with_trace_agent_port) { 4 }
+
+        it 'prioritizes the DD_TRACE_AGENT_URL' do
+          expect(resolver).to have_attributes(port: 3)
+        end
+
+        it 'logs a warning' do
+          expect(logger).to receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+
+      # This somewhat duplicates some of the testing above, but it's still helpful to validate that the test is correct
+      # (otherwise it may pass due to bugs, not due to right priority being used)
+      context 'when only DD_TRACE_AGENT_PORT is provided' do
+        let(:with_trace_agent_port) { 4 }
+
+        it 'uses the DD_TRACE_AGENT_PORT' do
+          expect(resolver).to have_attributes(port: 4)
+        end
+
+        it 'does not log any warning' do
+          expect(logger).to_not receive(:warn).with(/Configuration mismatch/)
+
+          resolver
+        end
+      end
+    end
+  end
+
+  context 'when a custom url is specified via environment variable' do
+    let(:environment) { { 'DD_TRACE_AGENT_URL' => 'http://custom-hostname:1234' } }
+
+    it 'contacts the agent using the http adapter, using the custom hostname and port' do
+      expect(resolver).to have_attributes(
+        **settings,
+        ssl: false,
+        hostname: 'custom-hostname',
+        port: 1234
+      )
+    end
+
+    context 'when the uri scheme is https' do
+      let(:environment) { { 'DD_TRACE_AGENT_URL' => 'https://custom-hostname:1234' } }
+
+      it 'contacts the agent using the http adapter, using ssl: true' do
+        expect(resolver).to have_attributes(ssl: true)
+      end
+    end
+
+    context 'when the uri scheme is not http OR https' do
+      let(:environment) { { 'DD_TRACE_AGENT_URL' => 'steam://custom-hostname:1234' } }
+
+      before do
+        allow(logger).to receive(:warn)
+      end
+
+      it 'falls back to the defaults' do
+        expect(resolver).to have_attributes settings
+      end
+
+      it 'logs a warning' do
+        expect(logger).to receive(:warn).with(/Invalid URI scheme/)
+
+        resolver
+      end
+    end
+  end
+
+  context 'when a proc is configured in tracer.transport_options' do
+    before do
+      ddtrace_settings.tracing.transport_options = transport_options
+    end
+
+    context 'when the proc does not configure the :net_http or :unix adapters' do
+      let(:transport_options) { proc {} }
+
+      it 'includes the given proc in the resolved settings as the deprecated_for_removal_transport_configuration_proc' do
+        expect(resolver).to have_attributes(
+          **settings,
+          deprecated_for_removal_transport_configuration_proc: transport_options
+        )
+      end
+    end
+
+    context 'when the proc requests the :net_http adapter' do
+      let(:transport_options) do
+        proc { |t| t.adapter(:net_http, hostname: 'custom-hostname', port: 1234, timeout: 42, ssl: false) }
+      end
+
+      it 'contacts the agent using the http adapter, using the requested configuration' do
+        expect(resolver).to have_attributes(
+          **settings,
+          ssl: false,
+          hostname: 'custom-hostname',
+          port: 1234,
+          timeout_seconds: 42,
+        )
+      end
+
+      context 'with ssl' do
+        let(:transport_options) do
+          proc { |t| t.adapter(:net_http, hostname: 'custom-hostname', port: 1234, timeout: 42, ssl: true) }
+        end
+
+        it 'contacts the agent using the http adapter, using the requested configuration' do
+          expect(resolver).to have_attributes(
+            **settings,
+            ssl: true,
+            hostname: 'custom-hostname',
+            port: 1234,
+            timeout_seconds: 42,
+          )
+        end
+      end
+
+      context 'when the proc tries to set any other option' do
+        let(:transport_options) do
+          proc do |t|
+            t.adapter(:net_http, hostname: 'cus
