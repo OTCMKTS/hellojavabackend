@@ -187,4 +187,163 @@ RSpec.describe Datadog::Core::Configuration::Components do
       end
 
       context 'with :level' do
-        let(:level) { double('level
+        let(:level) { double('level') }
+
+        before do
+          allow(settings.logger)
+            .to receive(:level)
+            .and_return(level)
+        end
+
+        it_behaves_like 'new logger'
+      end
+
+      context 'with debug: true' do
+        before { settings.diagnostics.debug = true }
+
+        it_behaves_like 'new logger' do
+          let(:level) { ::Logger::DEBUG }
+        end
+
+        context 'and a conflicting log level' do
+          before do
+            allow(settings.logger)
+              .to receive(:level)
+              .and_return(::Logger::INFO)
+          end
+
+          it_behaves_like 'new logger' do
+            let(:level) { ::Logger::DEBUG }
+          end
+        end
+      end
+    end
+  end
+
+  describe '::build_telemetry' do
+    subject(:build_telemetry) { described_class.build_telemetry(settings) }
+
+    context 'given settings' do
+      let(:telemetry_client) { instance_double(Datadog::Core::Telemetry::Client) }
+      let(:default_options) { { enabled: enabled } }
+      let(:enabled) { true }
+
+      before do
+        expect(Datadog::Core::Telemetry::Client).to receive(:new).with(default_options).and_return(telemetry_client)
+        allow(settings.telemetry).to receive(:enabled).and_return(enabled)
+      end
+
+      it { is_expected.to be(telemetry_client) }
+
+      context 'with :enabled' do
+        let(:enabled) { double('enabled') }
+
+        it { is_expected.to be(telemetry_client) }
+      end
+    end
+  end
+
+  describe '::build_runtime_metrics' do
+    subject(:build_runtime_metrics) { described_class.build_runtime_metrics(settings) }
+
+    context 'given settings' do
+      shared_examples_for 'new runtime metrics' do
+        let(:runtime_metrics) { instance_double(Datadog::Core::Runtime::Metrics) }
+        let(:default_options) { { enabled: settings.runtime_metrics.enabled, services: [settings.service] } }
+        let(:options) { {} }
+
+        before do
+          expect(Datadog::Core::Runtime::Metrics).to receive(:new)
+            .with(default_options.merge(options))
+            .and_return(runtime_metrics)
+        end
+
+        it { is_expected.to be(runtime_metrics) }
+      end
+
+      context 'by default' do
+        it_behaves_like 'new runtime metrics'
+      end
+
+      context 'with :enabled' do
+        let(:enabled) { double('enabled') }
+
+        before do
+          allow(settings.runtime_metrics)
+            .to receive(:enabled)
+            .and_return(enabled)
+        end
+
+        it_behaves_like 'new runtime metrics' do
+          let(:options) { { enabled: enabled } }
+        end
+      end
+
+      context 'with :service' do
+        let(:service) { double('service') }
+
+        before do
+          allow(settings)
+            .to receive(:service)
+            .and_return(service)
+        end
+
+        it_behaves_like 'new runtime metrics' do
+          let(:options) { { services: [service] } }
+        end
+      end
+
+      context 'with :statsd' do
+        let(:statsd) { instance_double(::Datadog::Statsd) }
+
+        before do
+          allow(settings.runtime_metrics)
+            .to receive(:statsd)
+            .and_return(statsd)
+        end
+
+        it_behaves_like 'new runtime metrics' do
+          let(:options) { { statsd: statsd } }
+        end
+      end
+    end
+  end
+
+  describe '::build_runtime_metrics_worker' do
+    subject(:build_runtime_metrics_worker) { described_class.build_runtime_metrics_worker(settings) }
+
+    context 'given settings' do
+      shared_examples_for 'new runtime metrics worker' do
+        let(:runtime_metrics_worker) { instance_double(Datadog::Core::Workers::RuntimeMetrics) }
+        let(:runtime_metrics) { instance_double(Datadog::Core::Runtime::Metrics) }
+        let(:default_options) do
+          {
+            enabled: settings.runtime_metrics.enabled,
+            metrics: runtime_metrics
+          }
+        end
+        let(:options) { {} }
+
+        before do
+          allow(described_class).to receive(:build_runtime_metrics)
+            .with(settings)
+            .and_return(runtime_metrics)
+
+          expect(Datadog::Core::Workers::RuntimeMetrics).to receive(:new)
+            .with(default_options.merge(options))
+            .and_return(runtime_metrics_worker)
+        end
+
+        it { is_expected.to be(runtime_metrics_worker) }
+      end
+
+      context 'by default' do
+        it_behaves_like 'new runtime metrics worker'
+      end
+
+      context 'with :enabled' do
+        let(:enabled) { double('enabled') }
+
+        before do
+          allow(settings.runtime_metrics)
+            .to
