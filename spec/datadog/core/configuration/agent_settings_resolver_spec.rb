@@ -489,4 +489,94 @@ RSpec.describe Datadog::Core::Configuration::AgentSettingsResolver do
       context 'when the proc tries to set any other option' do
         let(:transport_options) do
           proc do |t|
-            t.adapter(:net_http, hostname: 'cus
+            t.adapter(:net_http, hostname: 'custom-hostname', port: 1234, timeout: 42, ssl: true)
+            t.another_option = 2
+          end
+        end
+
+        before do
+          allow(logger).to receive(:debug)
+        end
+
+        it 'includes the given proc in the resolved settings as the ' \
+        'deprecated_for_removal_transport_configuration_proc and falls back to the defaults' do
+          expect(resolver).to have_attributes(
+            **settings,
+            deprecated_for_removal_transport_configuration_proc: transport_options
+          )
+        end
+
+        it 'logs a debug message' do
+          expect(logger).to receive(:debug)
+
+          resolver
+        end
+      end
+    end
+
+    context 'when the proc requests the :unix adapter' do
+      let(:transport_options) do
+        proc { |t| t.adapter(:unix, uds_path: '/custom/uds/path') }
+      end
+
+      it 'configures the agent to connect via a unix domain socket' do
+        expect(resolver).to have_attributes(
+          **settings,
+          adapter: :unix,
+          uds_path: '/custom/uds/path',
+          hostname: nil,
+          port: nil,
+        )
+      end
+
+      context 'when the proc tries to set any other option' do
+        let(:transport_options) do
+          proc do |t|
+            t.adapter(:unix, uds_path: '/custom/uds/path')
+            t.another_option = 2
+          end
+        end
+
+        before do
+          allow(logger).to receive(:debug)
+        end
+
+        it 'includes the given proc in the resolved settings as the ' \
+          'deprecated_for_removal_transport_configuration_proc and falls back to the defaults' do
+            expect(resolver).to have_attributes(
+              **settings,
+              deprecated_for_removal_transport_configuration_proc: transport_options
+            )
+          end
+
+        it 'logs a debug message' do
+          expect(logger).to receive(:debug)
+
+          resolver
+        end
+      end
+    end
+  end
+
+  describe '#log_warning' do
+    let(:message) { 'this is a test warning' }
+
+    subject(:log_warning) do
+      described_class.new(ddtrace_settings, logger: logger).send(:log_warning, message)
+    end
+
+    it 'logs a warning used the configured logger' do
+      expect(logger).to receive(:warn).with('this is a test warning')
+
+      log_warning
+    end
+
+    context 'when logger is nil' do
+      let(:logger) { nil }
+
+      it 'does not log anything' do
+        log_warning
+      end
+    end
+  end
+end
