@@ -346,4 +346,142 @@ RSpec.describe Datadog::Core::Configuration::Components do
 
         before do
           allow(settings.runtime_metrics)
-            .to
+            .to receive(:enabled)
+            .and_return(enabled)
+        end
+
+        it_behaves_like 'new runtime metrics worker' do
+          let(:options) { { enabled: enabled } }
+        end
+      end
+
+      context 'with :opts' do
+        let(:opts) { { custom_option: :custom_value } }
+
+        before do
+          allow(settings.runtime_metrics)
+            .to receive(:opts)
+            .and_return(opts)
+        end
+
+        it_behaves_like 'new runtime metrics worker' do
+          let(:options) { opts }
+        end
+      end
+    end
+  end
+
+  describe '::build_tracer' do
+    subject(:build_tracer) { described_class.build_tracer(settings, agent_settings) }
+
+    context 'given an instance' do
+      let(:instance) { instance_double(Datadog::Tracing::Tracer) }
+
+      before do
+        expect(settings.tracing).to receive(:instance)
+          .and_return(instance)
+      end
+
+      it 'uses the tracer instance' do
+        expect(Datadog::Tracing::Tracer).to_not receive(:new)
+        is_expected.to be(instance)
+      end
+    end
+
+    context 'given settings' do
+      shared_examples_for 'new tracer' do
+        let(:tracer) { instance_double(Datadog::Tracing::Tracer) }
+        let(:writer) { Datadog::Tracing::Writer.new }
+        let(:trace_flush) { be_a(Datadog::Tracing::Flush::Finished) }
+        let(:sampler) do
+          if defined?(super)
+            super()
+          else
+            lambda do |sampler|
+              expect(sampler).to be_a(Datadog::Tracing::Sampling::PrioritySampler)
+              expect(sampler.pre_sampler).to be_a(Datadog::Tracing::Sampling::AllSampler)
+              expect(sampler.priority_sampler.rate_limiter.rate).to eq(settings.tracing.sampling.rate_limit)
+              expect(sampler.priority_sampler.default_sampler).to be_a(Datadog::Tracing::Sampling::RateByServiceSampler)
+            end
+          end
+        end
+        let(:span_sampler) { be_a(Datadog::Tracing::Sampling::Span::Sampler) }
+        let(:default_options) do
+          {
+            default_service: settings.service,
+            enabled: settings.tracing.enabled,
+            trace_flush: trace_flush,
+            tags: settings.tags,
+            sampler: sampler,
+            span_sampler: span_sampler,
+            writer: writer,
+          }
+        end
+
+        let(:options) { defined?(super) ? super() : {} }
+        let(:tracer_options) { default_options.merge(options) }
+        let(:writer_options) { defined?(super) ? super() : {} }
+
+        before do
+          expect(Datadog::Tracing::Tracer).to receive(:new)
+            .with(tracer_options)
+            .and_return(tracer)
+
+          allow(Datadog::Tracing::Writer).to receive(:new)
+            .with(agent_settings: agent_settings, **writer_options)
+            .and_return(writer)
+        end
+
+        after do
+          writer.stop
+        end
+
+        it { is_expected.to be(tracer) }
+      end
+
+      shared_examples 'event publishing writer' do
+        it 'subscribes to writer events' do
+          expect(writer.events.after_send).to receive(:subscribe) do |&block|
+            expect(block)
+              .to be(
+                Datadog::Core::Configuration::Components
+                  .singleton_class::WRITER_RECORD_ENVIRONMENT_INFORMATION_CALLBACK
+              )
+          end
+
+          build_tracer
+        end
+      end
+
+      shared_examples 'event publishing writer and priority sampler' do
+        it_behaves_like 'event publishing writer'
+
+        before do
+          allow(writer.events.after_send).to receive(:subscribe)
+        end
+
+        let(:sampler_rates_callback) { -> { double('sampler rates callback') } }
+
+        it 'subscribes to writer events' do
+          expect(described_class).to receive(:writer_update_priority_sampler_rates_callback)
+            .with(tracer_options[:sampler]).and_return(sampler_rates_callback)
+
+          expect(writer.events.after_send).to receive(:subscribe) do |&block|
+            expect(block)
+              .to be(
+                Datadog::Core::Configuration::Components
+                                       .singleton_class::WRITER_RECORD_ENVIRONMENT_INFORMATION_CALLBACK
+              )
+          end
+
+          expect(writer.events.after_send).to receive(:subscribe) do |&block|
+            expect(block).to be(sampler_rates_callback)
+          end
+          build_tracer
+        end
+      end
+
+      context 'by default' do
+        it_behaves_like 'new tracer' do
+          it_behaves_like 'event publishing writer and priority sampler'
+    
