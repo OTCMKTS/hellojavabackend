@@ -484,4 +484,151 @@ RSpec.describe Datadog::Core::Configuration::Components do
       context 'by default' do
         it_behaves_like 'new tracer' do
           it_behaves_like 'event publishing writer and priority sampler'
-    
+        end
+      end
+
+      context 'with :enabled' do
+        let(:enabled) { double('enabled') }
+
+        before do
+          allow(settings.tracing)
+            .to receive(:enabled)
+            .and_return(enabled)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { enabled: enabled } }
+          it_behaves_like 'event publishing writer and priority sampler'
+        end
+      end
+
+      context 'with :env' do
+        let(:env) { double('env') }
+
+        before do
+          allow(settings)
+            .to receive(:env)
+            .and_return(env)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { tags: { 'env' => env } } }
+          it_behaves_like 'event publishing writer and priority sampler'
+        end
+      end
+
+      context 'with :partial_flush :enabled' do
+        let(:enabled) { true }
+
+        before do
+          allow(settings.tracing.partial_flush)
+            .to receive(:enabled)
+            .and_return(enabled)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { trace_flush: be_a(Datadog::Tracing::Flush::Partial) } }
+          it_behaves_like 'event publishing writer and priority sampler'
+        end
+
+        context 'with :partial_flush :min_spans_threshold' do
+          let(:min_spans_threshold) { double('min_spans_threshold') }
+
+          before do
+            allow(settings.tracing.partial_flush)
+              .to receive(:min_spans_threshold)
+              .and_return(min_spans_threshold)
+          end
+
+          it_behaves_like 'new tracer' do
+            let(:options) do
+              { trace_flush: be_a(Datadog::Tracing::Flush::Partial) &
+                have_attributes(min_spans_for_partial: min_spans_threshold) }
+            end
+
+            it_behaves_like 'event publishing writer and priority sampler'
+          end
+        end
+      end
+
+      context 'with :priority_sampling' do
+        before do
+          allow(settings.tracing)
+            .to receive(:priority_sampling)
+            .and_return(priority_sampling)
+        end
+
+        context 'enabled' do
+          let(:priority_sampling) { true }
+
+          it_behaves_like 'new tracer'
+
+          context 'with :sampler' do
+            before do
+              allow(settings.tracing)
+                .to receive(:sampler)
+                .and_return(sampler)
+            end
+
+            context 'that is a priority sampler' do
+              let(:sampler) { Datadog::Tracing::Sampling::PrioritySampler.new }
+
+              it_behaves_like 'new tracer' do
+                let(:options) { { sampler: sampler } }
+                it_behaves_like 'event publishing writer and priority sampler'
+              end
+            end
+
+            context 'that is not a priority sampler' do
+              let(:sampler) { double('sampler') }
+
+              context 'wraps sampler in a priority sampler' do
+                it_behaves_like 'new tracer' do
+                  let(:options) do
+                    { sampler: be_a(Datadog::Tracing::Sampling::PrioritySampler) & have_attributes(
+                      pre_sampler: sampler,
+                      priority_sampler: be_a(Datadog::Tracing::Sampling::RuleSampler)
+                    ) }
+                  end
+
+                  it_behaves_like 'event publishing writer and priority sampler'
+                end
+              end
+            end
+          end
+        end
+
+        context 'disabled' do
+          let(:priority_sampling) { false }
+
+          it_behaves_like 'new tracer' do
+            let(:options) { { sampler: be_a(Datadog::Tracing::Sampling::RuleSampler) } }
+          end
+
+          context 'with :sampler' do
+            before do
+              allow(settings.tracing)
+                .to receive(:sampler)
+                .and_return(sampler)
+            end
+
+            let(:sampler) { double('sampler') }
+
+            it_behaves_like 'new tracer' do
+              let(:options) { { sampler: sampler } }
+              it_behaves_like 'event publishing writer'
+            end
+          end
+        end
+      end
+
+      context 'with sampling.span_rules' do
+        before { allow(settings.tracing.sampling).to receive(:span_rules).and_return(rules) }
+
+        context 'with rules' do
+          let(:rules) { '[{"name":"foo"}]' }
+
+          it_behaves_like 'new tracer' do
+            let(:options) do
+              {
+                span_sampler: be_a(Datadog::Tracing::Sampling::S
