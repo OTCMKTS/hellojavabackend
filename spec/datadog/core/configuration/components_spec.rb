@@ -778,4 +778,156 @@ RSpec.describe Datadog::Core::Configuration::Components do
                   end
                   let(:writer) { sync_writer }
 
-               
+                  it_behaves_like 'event publishing writer'
+                end
+              end
+            end
+
+            context 'and :writer_options' do
+              before do
+                allow(settings.tracing.test_mode)
+                  .to receive(:writer_options)
+                  .and_return(writer_options)
+              end
+
+              context 'are set' do
+                let(:writer_options) { { transport_options: :bar } }
+
+                it_behaves_like 'new tracer' do
+                  let(:options) do
+                    {
+                      writer: writer
+                    }
+                  end
+                  let(:writer) { sync_writer }
+
+                  it_behaves_like 'event publishing writer'
+                end
+              end
+            end
+          end
+        end
+      end
+
+      context 'with :version' do
+        let(:version) { double('version') }
+
+        before do
+          allow(settings)
+            .to receive(:version)
+            .and_return(version)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { tags: { 'version' => version } } }
+        end
+      end
+
+      context 'with :writer' do
+        let(:writer) { instance_double(Datadog::Tracing::Writer) }
+
+        before do
+          allow(settings.tracing)
+            .to receive(:writer)
+            .and_return(writer)
+
+          expect(Datadog::Tracing::Writer).to_not receive(:new)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { writer: writer } }
+        end
+
+        context 'that publishes events' do
+          it_behaves_like 'new tracer' do
+            let(:options) { { writer: writer } }
+            let(:writer) { Datadog::Tracing::Writer.new }
+            after { writer.stop }
+
+            it_behaves_like 'event publishing writer and priority sampler'
+          end
+        end
+      end
+
+      context 'with :writer_options' do
+        let(:writer_options) { { custom_option: :custom_value } }
+
+        it_behaves_like 'new tracer' do
+          before do
+            expect(settings.tracing)
+              .to receive(:writer_options)
+              .and_return(writer_options)
+          end
+        end
+
+        context 'and :writer' do
+          let(:writer) { double('writer') }
+
+          before do
+            allow(settings.tracing)
+              .to receive(:writer)
+              .and_return(writer)
+          end
+
+          it_behaves_like 'new tracer' do
+            # Ignores the writer options in favor of the writer
+            let(:options) { { writer: writer } }
+          end
+        end
+      end
+    end
+  end
+
+  describe 'writer event callbacks' do
+    describe Datadog::Core::Configuration::Components.singleton_class::WRITER_RECORD_ENVIRONMENT_INFORMATION_CALLBACK do
+      subject(:call) { described_class.call(writer, responses) }
+      let(:writer) { double('writer') }
+      let(:responses) { [double('response')] }
+
+      it 'invokes the environment logger with responses' do
+        expect(Datadog::Core::Diagnostics::EnvironmentLogger).to receive(:log!).with(responses)
+        call
+      end
+    end
+
+    describe '.writer_update_priority_sampler_rates_callback' do
+      subject(:call) do
+        described_class.writer_update_priority_sampler_rates_callback(sampler).call(writer, responses)
+      end
+
+      let(:sampler) { double('sampler') }
+      let(:writer) { double('writer') }
+      let(:responses) do
+        [
+          double('first response'),
+          double('last response', internal_error?: internal_error, service_rates: service_rates),
+        ]
+      end
+
+      let(:service_rates) { nil }
+
+      context 'with a successful response' do
+        let(:internal_error) { false }
+
+        context 'with service rates returned by response' do
+          let(:service_rates) { double('service rates') }
+
+          it 'updates sampler with service rates and set decision to AGENT_RATE' do
+            expect(sampler).to receive(:update).with(service_rates, decision: '-1')
+            call
+          end
+        end
+
+        context 'without service rates returned by response' do
+          it 'does not update sampler' do
+            expect(sampler).to_not receive(:update)
+            call
+          end
+        end
+      end
+
+      context 'with an internal error response' do
+        let(:internal_error) { true }
+
+        it 'does not update sampler' do
+          expect(sampler).to_not receive(:updat
