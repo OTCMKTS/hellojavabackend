@@ -631,4 +631,151 @@ RSpec.describe Datadog::Core::Configuration::Components do
           it_behaves_like 'new tracer' do
             let(:options) do
               {
-                span_sampler: be_a(Datadog::Tracing::Sampling::S
+                span_sampler: be_a(Datadog::Tracing::Sampling::Span::Sampler) & have_attributes(
+                  rules: [
+                    Datadog::Tracing::Sampling::Span::Rule.new(
+                      Datadog::Tracing::Sampling::Span::Matcher.new(name_pattern: 'foo')
+                    )
+                  ]
+                )
+              }
+            end
+          end
+        end
+
+        context 'without rules' do
+          let(:rules) { nil }
+
+          it_behaves_like 'new tracer' do
+            let(:options) { { span_sampler: be_a(Datadog::Tracing::Sampling::Span::Sampler) & have_attributes(rules: []) } }
+          end
+        end
+      end
+
+      context 'with :service' do
+        let(:service) { double('service') }
+
+        before do
+          allow(settings)
+            .to receive(:service)
+            .and_return(service)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { default_service: service } }
+          it_behaves_like 'event publishing writer and priority sampler'
+        end
+      end
+
+      context 'with :tags' do
+        let(:tags) do
+          {
+            'env' => 'tag_env',
+            'version' => 'tag_version'
+          }
+        end
+
+        before do
+          allow(settings)
+            .to receive(:tags)
+            .and_return(tags)
+        end
+
+        it_behaves_like 'new tracer' do
+          let(:options) { { tags: tags } }
+          it_behaves_like 'event publishing writer and priority sampler'
+        end
+
+        context 'with conflicting :env' do
+          let(:env) { 'setting_env' }
+
+          before do
+            allow(settings)
+              .to receive(:env)
+              .and_return(env)
+          end
+
+          it_behaves_like 'new tracer' do
+            let(:options) { { tags: tags.merge('env' => env) } }
+            it_behaves_like 'event publishing writer and priority sampler'
+          end
+        end
+
+        context 'with conflicting :version' do
+          let(:version) { 'setting_version' }
+
+          before do
+            allow(settings)
+              .to receive(:version)
+              .and_return(version)
+          end
+
+          it_behaves_like 'new tracer' do
+            let(:options) { { tags: tags.merge('version' => version) } }
+            it_behaves_like 'event publishing writer and priority sampler'
+          end
+        end
+      end
+
+      context 'with :test_mode' do
+        let(:sampler) do
+          lambda do |sampler|
+            expect(sampler).to be_a(Datadog::Tracing::Sampling::PrioritySampler)
+            expect(sampler.pre_sampler).to be_a(Datadog::Tracing::Sampling::AllSampler)
+            expect(sampler.priority_sampler).to be_a(Datadog::Tracing::Sampling::AllSampler)
+          end
+        end
+
+        context ':enabled' do
+          before do
+            allow(settings.tracing.test_mode)
+              .to receive(:enabled)
+              .and_return(enabled)
+          end
+
+          context 'set to true' do
+            let(:enabled) { true }
+            let(:sync_writer) { Datadog::Tracing::SyncWriter.new }
+
+            before do
+              expect(Datadog::Tracing::SyncWriter)
+                .to receive(:new)
+                .with(agent_settings: agent_settings, **writer_options)
+                .and_return(writer)
+            end
+
+            context 'and :trace_flush' do
+              before do
+                allow(settings.tracing.test_mode)
+                  .to receive(:trace_flush)
+                  .and_return(trace_flush)
+              end
+
+              context 'is not set' do
+                let(:trace_flush) { nil }
+
+                it_behaves_like 'new tracer' do
+                  let(:options) do
+                    {
+                      writer: kind_of(Datadog::Tracing::SyncWriter)
+                    }
+                  end
+                  let(:writer) { sync_writer }
+
+                  it_behaves_like 'event publishing writer'
+                end
+              end
+
+              context 'is set' do
+                let(:trace_flush) { instance_double(Datadog::Tracing::Flush::Finished) }
+
+                it_behaves_like 'new tracer' do
+                  let(:options) do
+                    {
+                      trace_flush: trace_flush,
+                      writer: kind_of(Datadog::Tracing::SyncWriter)
+                    }
+                  end
+                  let(:writer) { sync_writer }
+
+               
