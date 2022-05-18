@@ -1454,4 +1454,26 @@ RSpec.describe Datadog::Core::Configuration::Components do
           expect(components.health_metrics.statsd).to receive(:close)
 
           shutdown!
-       
+        end
+      end
+
+      context 'when both Statsd instances are reused' do
+        include_context 'replacement' do
+          let(:runtime_metrics_worker) { components.runtime_metrics }
+          let(:health_metrics) { components.health_metrics }
+        end
+
+        it 'shuts down all components but the tracer' do
+          expect(components.tracer).to receive(:shutdown!)
+          expect(components.profiler).to receive(:shutdown!) unless components.profiler.nil?
+          expect(components.runtime_metrics).to receive(:stop)
+            .with(true, close_metrics: false)
+          expect(components.runtime_metrics.metrics.statsd).to_not receive(:close)
+          expect(components.health_metrics.statsd).to_not receive(:close)
+
+          shutdown!
+        end
+      end
+    end
+  end
+end
