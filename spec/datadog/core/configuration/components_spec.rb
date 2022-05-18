@@ -1069,4 +1069,130 @@ RSpec.describe Datadog::Core::Configuration::Components do
           build_profiler
         end
 
-        context 'when
+        context 'when force_enable_gc_profiling is enabled' do
+          before do
+            settings.profiling.advanced.force_enable_gc_profiling = true
+
+            allow(Datadog.logger).to receive(:debug)
+          end
+
+          it 'initializes a CpuAndWallTimeWorker collector with gc_profiling_enabled set to true' do
+            expect(Datadog::Profiling::Collectors::CpuAndWallTimeWorker).to receive(:new).with hash_including(
+              gc_profiling_enabled: true,
+            )
+
+            build_profiler
+          end
+
+          context 'on Ruby 3.x' do
+            before { skip 'Behavior does not apply to current Ruby version' if RUBY_VERSION < '3.0' }
+
+            it 'logs a debug message' do
+              expect(Datadog.logger).to receive(:debug).with(/Garbage Collection force enabled/)
+
+              build_profiler
+            end
+          end
+        end
+
+        context 'when allocation_counting_enabled is enabled' do
+          before do
+            settings.profiling.advanced.allocation_counting_enabled = true
+          end
+
+          it 'initializes a CpuAndWallTimeWorker collector with allocation_counting_enabled set to true' do
+            expect(Datadog::Profiling::Collectors::CpuAndWallTimeWorker).to receive(:new).with hash_including(
+              allocation_counting_enabled: true,
+            )
+
+            build_profiler
+          end
+        end
+
+        context 'when allocation_counting_enabled is disabled' do
+          before do
+            settings.profiling.advanced.allocation_counting_enabled = false
+          end
+
+          it 'initializes a CpuAndWallTimeWorker collector with allocation_counting_enabled set to false' do
+            expect(Datadog::Profiling::Collectors::CpuAndWallTimeWorker).to receive(:new).with hash_including(
+              allocation_counting_enabled: false,
+            )
+
+            build_profiler
+          end
+        end
+
+        it 'sets up the Profiler with the CpuAndWallTimeWorker collector' do
+          expect(Datadog::Profiling::Profiler).to receive(:new).with(
+            [instance_of(Datadog::Profiling::Collectors::CpuAndWallTimeWorker)],
+            anything,
+          )
+
+          build_profiler
+        end
+
+        it 'sets up the Exporter with the StackRecorder' do
+          expect(Datadog::Profiling::Exporter)
+            .to receive(:new).with(hash_including(pprof_recorder: instance_of(Datadog::Profiling::StackRecorder)))
+
+          build_profiler
+        end
+
+        it 'sets up the StackRecorder with alloc_samples_enabled: false' do
+          expect(Datadog::Profiling::StackRecorder)
+            .to receive(:new).with(hash_including(alloc_samples_enabled: false)).and_call_original
+
+          build_profiler
+        end
+
+        context 'when on Linux' do
+          before { stub_const('RUBY_PLATFORM', 'some-linux-based-platform') }
+
+          it 'sets up the StackRecorder with cpu_time_enabled: true' do
+            expect(Datadog::Profiling::StackRecorder)
+              .to receive(:new).with(hash_including(cpu_time_enabled: true)).and_call_original
+
+            build_profiler
+          end
+        end
+
+        context 'when not on Linux' do
+          before { stub_const('RUBY_PLATFORM', 'some-other-os') }
+
+          it 'sets up the StackRecorder with cpu_time_enabled: false' do
+            expect(Datadog::Profiling::StackRecorder)
+              .to receive(:new).with(hash_including(cpu_time_enabled: false)).and_call_original
+
+            build_profiler
+          end
+        end
+      end
+
+      it 'runs the setup task to set up any needed extensions for profiling' do
+        expect(profiler_setup_task).to receive(:run)
+
+        build_profiler
+      end
+
+      it 'builds an HttpTransport with the current settings' do
+        expect(Datadog::Profiling::HttpTransport).to receive(:new).with(
+          agent_settings: agent_settings,
+          site: settings.site,
+          api_key: settings.api_key,
+          upload_timeout_seconds: settings.profiling.upload.timeout_seconds,
+        )
+
+        build_profiler
+      end
+
+      it 'creates a scheduler with an HttpTransport' do
+        expect(Datadog::Profiling::Scheduler).to receive(:new) do |transport:, **_|
+          expect(transport).to be_a_kind_of(Datadog::Profiling::HttpTransport)
+        end
+
+        build_profiler
+      end
+
+      [true, false].each do |value|
+        context "when endpoint_collection_enabled is #{value
