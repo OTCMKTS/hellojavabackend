@@ -1195,4 +1195,164 @@ RSpec.describe Datadog::Core::Configuration::Components do
       end
 
       [true, false].each do |value|
-        context "when endpoint_collection_enabled is #{value
+        context "when endpoint_collection_enabled is #{value}" do
+          before { settings.profiling.advanced.endpoint.collection.enabled = value }
+
+          it "initializes the TraceIdentifiers::Helper with endpoint_collection_enabled: #{value}" do
+            expect(Datadog::Profiling::TraceIdentifiers::Helper)
+              .to receive(:new).with(tracer: tracer, endpoint_collection_enabled: value)
+
+            build_profiler
+          end
+        end
+      end
+
+      it 'initializes the exporter with a code provenance collector' do
+        expect(Datadog::Profiling::Exporter).to receive(:new) do |code_provenance_collector:, **_|
+          expect(code_provenance_collector).to be_a_kind_of(Datadog::Profiling::Collectors::CodeProvenance)
+        end
+
+        build_profiler
+      end
+
+      context 'when code provenance is disabled' do
+        before { settings.profiling.advanced.code_provenance_enabled = false }
+
+        it 'initializes the exporter with a nil code provenance collector' do
+          expect(Datadog::Profiling::Exporter).to receive(:new) do |code_provenance_collector:, **_|
+            expect(code_provenance_collector).to be nil
+          end
+
+          build_profiler
+        end
+      end
+
+      context 'when a custom transport is provided' do
+        let(:custom_transport) { double('Custom transport') }
+
+        before do
+          settings.profiling.exporter.transport = custom_transport
+        end
+
+        it 'does not initialize an HttpTransport' do
+          expect(Datadog::Profiling::HttpTransport).to_not receive(:new)
+
+          build_profiler
+        end
+
+        it 'sets up the scheduler to use the custom transport' do
+          expect(Datadog::Profiling::Scheduler).to receive(:new) do |transport:, **_|
+            expect(transport).to be custom_transport
+          end
+
+          build_profiler
+        end
+      end
+    end
+  end
+
+  describe '#startup!' do
+    subject(:startup!) { components.startup!(settings) }
+
+    after do
+      components.telemetry.worker.terminate
+      components.telemetry.worker.join
+    end
+
+    context 'when profiling' do
+      context 'is unsupported' do
+        before do
+          allow(Datadog::Profiling)
+            .to receive(:unsupported_reason)
+            .and_return('Disabled for testing')
+        end
+
+        context 'and enabled' do
+          before do
+            allow(settings.profiling)
+              .to receive(:enabled)
+              .and_return(true)
+          end
+
+          it do
+            expect(components.profiler)
+              .to be nil
+
+            expect(components.logger)
+              .to receive(:warn)
+              .with(/profiling disabled/)
+
+            startup!
+          end
+        end
+
+        context 'and disabled' do
+          before do
+            allow(settings.profiling)
+              .to receive(:enabled)
+              .and_return(false)
+          end
+
+          it do
+            expect(components.profiler)
+              .to be nil
+
+            expect(components.logger)
+              .to_not receive(:warn)
+
+            startup!
+          end
+        end
+      end
+
+      context 'is enabled' do
+        before do
+          skip 'Profiling not supported.' unless Datadog::Profiling.supported?
+
+          allow(settings.profiling)
+            .to receive(:enabled)
+            .and_return(true)
+          allow(profiler_setup_task).to receive(:run)
+        end
+
+        it do
+          expect(components.profiler)
+            .to receive(:start)
+
+          startup!
+        end
+      end
+
+      context 'is disabled' do
+        before do
+          allow(settings.profiling)
+            .to receive(:enabled)
+            .and_return(false)
+        end
+
+        it do
+          expect(components.logger)
+            .to receive(:debug)
+            .with(/is disabled/)
+
+          startup!
+        end
+      end
+    end
+  end
+
+  describe '#shutdown!' do
+    subject(:shutdown!) { components.shutdown!(replacement) }
+
+    after do
+      components.telemetry.worker.terminate
+      components.telemetry.worker.join
+    end
+
+    context 'given no replacement' do
+      let(:replacement) { nil }
+
+      it 'shuts down all components' do
+        expect(components.tracer).to receive(:shutdown!)
+        expect(components.profiler).to receive(:shutdown!) unless components.profiler.nil?
+        expect(components.appsec).to receive(:shutdown!) unless compon
