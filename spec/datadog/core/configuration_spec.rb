@@ -108,4 +108,144 @@ RSpec.describe Datadog::Core::Configuration do
         end
 
         context 'is disabled with a custom logger in use' do
-          let(:ini
+          let(:initial_log_level) { ::Logger::INFO }
+          let(:logger) do
+            ::Logger.new(StringIO.new).tap do |l|
+              l.level = initial_log_level
+            end
+          end
+
+          before do
+            test_class.configure do |c|
+              c.logger.instance = logger
+              c.diagnostics.debug = false
+            end
+          end
+
+          it { expect(logger.level).to be initial_log_level }
+        end
+      end
+
+      context 'when the logger' do
+        context 'is replaced' do
+          let(:old_logger) { Datadog::Core::Logger.new($stdout) }
+          let(:new_logger) { Datadog::Core::Logger.new($stdout) }
+
+          before do
+            # Expect old loggers to NOT be closed, as closing
+            # underlying streams can cause problems.
+            expect(old_logger).to_not receive(:close)
+
+            test_class.configure { |c| c.logger.instance = old_logger }
+            test_class.configure { |c| c.logger.instance = new_logger }
+          end
+
+          it 'replaces the old logger' do
+            expect(test_class.logger).to be new_logger
+          end
+        end
+
+        context 'is reused' do
+          let(:logger) { Datadog::Core::Logger.new($stdout) }
+
+          before do
+            expect(logger).to_not receive(:close)
+
+            test_class.configure { |c| c.logger.instance = logger }
+            test_class.configure { |c| c.logger.instance = logger }
+          end
+
+          it 'reuses the same logger' do
+            expect(test_class.logger).to be logger
+          end
+        end
+
+        context 'is not changed' do
+          let(:logger) { Datadog::Core::Logger.new($stdout) }
+
+          before do
+            expect(logger).to_not receive(:close)
+
+            test_class.configure { |c| c.logger.instance = logger }
+            test_class.configure { |_c| }
+          end
+
+          it 'reuses the same logger' do
+            expect(test_class.logger).to be logger
+          end
+        end
+      end
+
+      context 'when the metrics' do
+        context 'are replaced' do
+          let(:old_statsd) { instance_double(Datadog::Statsd) }
+          let(:new_statsd) { instance_double(Datadog::Statsd) }
+
+          before do
+            expect(old_statsd).to receive(:close).once
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = old_statsd
+              c.diagnostics.health_metrics.statsd = old_statsd
+            end
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = new_statsd
+              c.diagnostics.health_metrics.statsd = new_statsd
+            end
+          end
+
+          it 'replaces the old Statsd and closes it' do
+            expect(test_class.send(:components).runtime_metrics.metrics.statsd).to be new_statsd
+            expect(test_class.health_metrics.statsd).to be new_statsd
+          end
+        end
+
+        context 'have one of a few replaced' do
+          let(:old_statsd) { instance_double(Datadog::Statsd) }
+          let(:new_statsd) { instance_double(Datadog::Statsd) }
+
+          before do
+            # Since its being reused, it should not be closed.
+            expect(old_statsd).to_not receive(:close)
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = old_statsd
+              c.diagnostics.health_metrics.statsd = old_statsd
+            end
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = new_statsd
+            end
+          end
+
+          it 'uses new and old Statsd but does not close the old Statsd' do
+            expect(test_class.send(:components).runtime_metrics.metrics.statsd).to be new_statsd
+            expect(test_class.health_metrics.statsd).to be old_statsd
+          end
+        end
+
+        context 'are reused' do
+          let(:statsd) { instance_double(Datadog::Statsd) }
+
+          before do
+            expect(statsd).to_not receive(:close)
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = statsd
+              c.diagnostics.health_metrics.statsd = statsd
+            end
+
+            test_class.configure do |c|
+              c.runtime_metrics.statsd = statsd
+              c.diagnostics.health_metrics.statsd = statsd
+            end
+          end
+
+          it 'reuses the same Statsd' do
+            expect(test_class.send(:components).runtime_metrics.metrics.statsd).to be statsd
+          end
+        end
+
+        context 'are not changed' do
+          let(:statsd) { instance_double(Datadog::S
