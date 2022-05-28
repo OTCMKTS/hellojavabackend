@@ -535,3 +535,119 @@ RSpec.describe Datadog::Core::Configuration do
       end
 
       context 'when components are initialized' do
+        before { test_class.send(:components) }
+
+        after { described_class.const_get(:COMPONENTS_WRITE_LOCK).tap { |lock| lock.unlock if lock.owned? } }
+
+        it 'returns the components without touching the COMPONENTS_WRITE_LOCK' do
+          described_class.const_get(:COMPONENTS_WRITE_LOCK).lock
+
+          expect(test_class.send(:components)).to_not be_nil
+        end
+      end
+    end
+
+    describe '#safely_synchronize' do
+      it 'runs the given block while holding the COMPONENTS_WRITE_LOCK' do
+        block_ran = false
+
+        test_class.send(:safely_synchronize) do
+          block_ran = true
+          expect(described_class.const_get(:COMPONENTS_WRITE_LOCK)).to be_owned
+        end
+
+        expect(block_ran).to be true
+      end
+
+      it 'returns the value of the given block' do
+        expect(test_class.send(:safely_synchronize) { :returned_value }).to be :returned_value
+      end
+
+      it 'provides a write_components callback that can be used to update the components' do
+        test_class.send(:safely_synchronize) do |write_components|
+          write_components.call(:updated_components)
+        end
+
+        expect(test_class.send(:components)).to be :updated_components
+      end
+
+      context 'when recursive execution triggers a deadlock' do
+        subject(:safely_synchronize) { test_class.send(:safely_synchronize) { test_class.send(:safely_synchronize) } }
+
+        before do
+          allow(test_class.send(:logger_without_components)).to receive(:error)
+        end
+
+        it 'logs an error' do
+          expect(test_class.send(:logger_without_components)).to receive(:error).with(/Detected deadlock/)
+
+          safely_synchronize
+        end
+
+        it 'does not let the exception propagate' do
+          expect { safely_synchronize }.to_not raise_error
+        end
+
+        it 'returns nil' do
+          expect(safely_synchronize).to be nil
+        end
+      end
+    end
+
+    # NOTE: This spec is a bit too coupled with the implementation, but I couldn't think of a better way (@ivoanjo)
+    describe '#handle_interrupt_shutdown!' do
+      subject(:handle_interrupt_shutdown!) { test_class.send(:handle_interrupt_shutdown!) }
+
+      let(:fake_thread) { instance_double(Thread, 'fake thread') }
+
+      it 'calls #shutdown! in a background thread' do
+        allow(fake_thread).to receive(:join).and_return(fake_thread)
+
+        expect(Thread).to receive(:new) do |&block|
+          expect(test_class).to receive(:shutdown!)
+
+          block.call
+        end.and_return(fake_thread)
+
+        handle_interrupt_shutdown!
+      end
+
+      context 'when #shutdown! is taking longer than the set threshold' do
+        let(:threshold_seconds) { 0.2 }
+
+        before do
+          expect(Thread).to receive(:new).and_return(fake_thread)
+          expect(fake_thread).to receive(:join).with(threshold_seconds).and_return(nil)
+
+          allow(fake_thread).to receive(:join).with(no_args)
+          allow(Datadog.logger).to receive(:info)
+        end
+
+        it 'logs a message' do
+          expect(Datadog.logger).to receive(:info).with(/ctrl\+c/)
+
+          handle_interrupt_shutdown!
+        end
+
+        it 'waits for the background thread to finish its work' do
+          expect(fake_thread).to receive(:join).with(no_args)
+
+          handle_interrupt_shutdown!
+        end
+      end
+
+      context 'when #shutdown! finishes faster than the set threshold' do
+        before do
+          expect(Thread).to receive(:new).and_return(fake_thread)
+          expect(fake_thread).to receive(:join).and_return(fake_thread)
+        end
+
+        it 'does not log a message' do
+          expect(Datadog.logger).to_not receive(:info)
+
+          handle_interrupt_shutdown!
+        end
+      end
+    end
+  end
+end
