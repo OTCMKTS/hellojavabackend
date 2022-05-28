@@ -240,3 +240,47 @@ RSpec.describe Datadog::Core::Environment::Cgroup do
         let(:line) { '1:name=systemd:/ecs/55091c13-b8cf-4801-b527-f4601742204d/432624d2150b349fe35ba397284dea788c2bf66b885d14dfc1569b01890ca7da' }
 
         it { is_expected.to be_a_kind_of(described_class::Descriptor) }
+
+        it do
+          is_expected.to have_attributes(
+            id: '1',
+            groups: 'name=systemd',
+            path: '/ecs/55091c13-b8cf-4801-b527-f4601742204d/432624d2150b349fe35ba397284dea788c2bf66b885d14dfc1569b01890ca7da',
+            controllers: ['name=systemd']
+          )
+        end
+      end
+
+      context 'in Fargate format 1.4+' do
+        let(:line) { '1:name=systemd:/ecs/34dc0b5e626f2c5c4c5170e34b10e765-1234567890' }
+
+        it { is_expected.to be_a_kind_of(described_class::Descriptor) }
+
+        it do
+          is_expected.to have_attributes(
+            id: '1',
+            groups: 'name=systemd',
+            path: '/ecs/34dc0b5e626f2c5c4c5170e34b10e765-1234567890',
+            controllers: ['name=systemd']
+          )
+        end
+      end
+
+      context 'in Fargate format 1.4+ (2-part)' do
+        let(:line) { '1:name=systemd:/ecs/34dc0b5e626f2c5c4c5170e34b10e765/34dc0b5e626f2c5c4c5170e34b10e765-1234567890' }
+
+        it { is_expected.to be_a_kind_of(described_class::Descriptor) }
+
+        it do
+          is_expected.to have_attributes(
+            id: '1',
+            groups: 'name=systemd',
+            path: '/ecs/34dc0b5e626f2c5c4c5170e34b10e765/34dc0b5e626f2c5c4c5170e34b10e765-1234567890',
+            controllers: ['name=systemd']
+          )
+        end
+      end
+    end
+  end
+end
+# rubocop:enable Layout/LineLength
