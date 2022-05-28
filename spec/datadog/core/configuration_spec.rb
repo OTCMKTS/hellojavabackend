@@ -389,3 +389,149 @@ RSpec.describe Datadog::Core::Configuration do
 
       context 'when the object has not been configured' do
         it { is_expected.to be nil }
+      end
+
+      context 'when the object has been configured' do
+        let(:options) { {} }
+
+        before { test_class.configure_onto(object, **options) }
+
+        context 'but no option is provided' do
+          let(:option_name) { nil }
+          it { is_expected.to be_a_kind_of(Datadog::Core::Pin) }
+        end
+
+        context 'but an option is provided' do
+          context 'and it has not been set' do
+            it { is_expected.to be nil }
+          end
+
+          context 'and it has been set' do
+            let(:option_value) { :a_value }
+            let(:options) { { option_name => option_value } }
+
+            it { is_expected.to be option_value }
+          end
+        end
+      end
+    end
+
+    describe '#health_metrics' do
+      subject(:health_metrics) { test_class.health_metrics }
+
+      it { is_expected.to be_a_kind_of(Datadog::Core::Diagnostics::Health::Metrics) }
+    end
+
+    describe '#logger' do
+      subject(:logger) { test_class.logger }
+
+      it { is_expected.to be_a_kind_of(Datadog::Core::Logger) }
+      it { expect(logger.level).to be default_log_level }
+
+      context 'when components are not initialized' do
+        it 'does not cause them to be initialized' do
+          logger
+
+          expect(test_class.send(:components?)).to be false
+        end
+      end
+
+      context 'when components are being replaced' do
+        before do
+          test_class.configure {}
+          allow(test_class.send(:components)).to receive(:shutdown!)
+        end
+
+        it 'returns the old logger' do
+          old_logger = test_class.logger
+          logger_during_component_replacement = nil
+
+          allow(Datadog::Core::Configuration::Components).to receive(:new) do
+            # simulate getting the logger during reinitialization
+            logger_during_component_replacement = test_class.logger
+            instance_double(Datadog::Core::Configuration::Components, startup!: nil)
+          end
+
+          test_class.configure {}
+
+          expect(logger_during_component_replacement).to be old_logger
+        end
+      end
+    end
+
+    describe '#runtime_metrics' do
+      subject(:runtime_metrics) { test_class.send(:components).runtime_metrics }
+
+      it { is_expected.to be_a_kind_of(Datadog::Core::Workers::RuntimeMetrics) }
+      it { expect(runtime_metrics.enabled?).to be false }
+      it { expect(runtime_metrics.running?).to be false }
+    end
+
+    describe '#shutdown!' do
+      subject(:shutdown!) { test_class.shutdown! }
+
+      let!(:original_components) { test_class.send(:components) }
+
+      it 'gracefully shuts down components' do
+        expect(original_components).to receive(:shutdown!)
+
+        shutdown!
+      end
+
+      it 'does not attempt to recreate components' do
+        shutdown!
+
+        expect(test_class.send(:components)).to be(original_components)
+      end
+    end
+
+    describe '#reset!' do
+      subject(:reset!) { test_class.send(:reset!) }
+
+      let!(:original_components) { test_class.send(:components) }
+
+      it 'gracefully shuts down components' do
+        expect(original_components).to receive(:shutdown!)
+
+        reset!
+      end
+
+      it 'allows for component re-creation' do
+        reset!
+
+        expect(test_class.send(:components)).to_not be(original_components)
+      end
+
+      context 'with configuration values set' do
+        let(:default_value) { 100 }
+        let(:custom_value) { 777 }
+
+        before do
+          test_class.configuration.tracing.sampling.rate_limit = custom_value
+        end
+
+        it 'resets the configuration' do
+          expect { reset! }.to change { test_class.configuration.tracing.sampling.rate_limit }
+            .from(custom_value).to(default_value)
+        end
+      end
+    end
+
+    describe '#components' do
+      context 'when components are not initialized' do
+        it 'initializes the components' do
+          test_class.send(:components)
+
+          expect(test_class.send(:components?)).to be true
+        end
+
+        context 'when allow_initialization is false' do
+          it 'does not initialize the components' do
+            test_class.send(:components, allow_initialization: false)
+
+            expect(test_class.send(:components?)).to be false
+          end
+        end
+      end
+
+      context 'when components are initialized' do
