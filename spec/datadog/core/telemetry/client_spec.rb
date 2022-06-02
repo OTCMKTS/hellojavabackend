@@ -194,4 +194,48 @@ RSpec.describe Datadog::Core::Telemetry::Client do
         it do
           stop!
 
-        
+          expect(client.worker).to_not have_received(:stop)
+        end
+      end
+    end
+  end
+
+  describe '#integrations_change!' do
+    subject(:integrations_change!) { client.integrations_change! }
+
+    after do
+      client.worker.stop(true)
+      client.worker.join
+    end
+
+    context 'when disabled' do
+      let(:enabled) { false }
+      it do
+        integrations_change!
+        expect(emitter).to_not have_received(:request).with(:'app-integrations-change')
+      end
+    end
+
+    context 'when enabled' do
+      let(:enabled) { true }
+      it do
+        integrations_change!
+        expect(emitter).to have_received(:request).with(:'app-integrations-change')
+      end
+
+      it { is_expected.to be(response) }
+    end
+
+    context 'when in fork' do
+      before { skip 'Fork not supported on current platform' unless Process.respond_to?(:fork) }
+
+      it do
+        client
+        expect_in_fork do
+          client.started!
+          expect(emitter).to_not receive(:request).with(:'app-integrations-change')
+        end
+      end
+    end
+  end
+end
