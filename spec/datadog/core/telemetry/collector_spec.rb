@@ -245,4 +245,119 @@ RSpec.describe Datadog::Core::Telemetry::Collector do
       end
       after { Datadog.configuration.appsec.send(:reset!) }
 
-      i
+      it { is_expected.to include('appsec.enabled' => true) }
+    end
+
+    context 'when OpenTelemetry is enabled' do
+      before do
+        stub_const('Datadog::OpenTelemetry::LOADED', true)
+      end
+
+      it { is_expected.to include('tracing.opentelemetry.enabled' => true) }
+    end
+  end
+
+  describe '#dependencies' do
+    subject(:dependencies) { dummy_class.dependencies }
+
+    it { is_expected.to be_a_kind_of(Array) }
+    it { is_expected.to all(be_a(Datadog::Core::Telemetry::V1::Dependency)) }
+  end
+
+  describe '#host' do
+    subject(:host) { dummy_class.host }
+
+    it { is_expected.to be_a_kind_of(Datadog::Core::Telemetry::V1::Host) }
+  end
+
+  describe '#integrations' do
+    subject(:integrations) { dummy_class.integrations }
+
+    it { is_expected.to be_a_kind_of(Array) }
+    it { is_expected.to all(be_a(Datadog::Core::Telemetry::V1::Integration)) }
+    it('contains list of all integrations') { expect(integrations.length).to eq(Datadog.registry.entries.length) }
+
+    context 'when a configure block is called' do
+      around do |example|
+        Datadog.registry[:rake].reset_configuration!
+        Datadog.registry[:pg].reset_configuration!
+        example.run
+        Datadog.registry[:rake].reset_configuration!
+        Datadog.registry[:pg].reset_configuration!
+      end
+      before do
+        require 'rake'
+        Datadog.configure do |c|
+          c.tracing.instrument :rake
+          c.tracing.instrument :pg
+        end
+      end
+
+      it 'sets integration as enabled' do
+        expect(integrations).to include(
+          an_object_having_attributes(name: 'rake', enabled: true, compatible: true, error: nil)
+        )
+      end
+
+      it 'propogates errors with configuration' do
+        expect(integrations)
+          .to include(
+            an_object_having_attributes(
+              name: 'pg',
+              enabled: false,
+              compatible: false,
+              error: 'Available?: false, Loaded? false, Compatible? false, Patchable? false'
+            )
+          )
+      end
+    end
+
+    context 'when error is raised in patching' do
+      let(:error) { instance_double('error', class: StandardError, message: nil, backtrace: []) }
+      before do
+        Datadog::Tracing::Contrib::Redis::Patcher.on_patch_error(error)
+        Datadog.configure do |c|
+          c.tracing.instrument :redis
+        end
+      end
+      after { Datadog::Tracing::Contrib::Redis::Patcher.patch_error_result = nil }
+      around do |example|
+        Datadog.registry[:redis].reset_configuration!
+        example.run
+        Datadog.registry[:redis].reset_configuration!
+      end
+      it do
+        expect(integrations)
+          .to include(
+            an_object_having_attributes(
+              name: 'redis',
+              enabled: false,
+              compatible: false,
+              error: { type: 'StandardError', message: nil, line: nil }.to_s
+            )
+          )
+      end
+    end
+  end
+
+  describe '#runtime_id' do
+    subject(:runtime_id) { dummy_class.runtime_id }
+
+    it { is_expected.to be_a_kind_of(String) }
+
+    context 'when invoked twice' do
+      it { is_expected.to eq(runtime_id) }
+    end
+  end
+
+  describe '#tracer_time' do
+    subject(:tracer_time) { dummy_class.tracer_time }
+
+    before do
+      allow(Time).to receive(:now).and_return(Time.at(1577836800))
+    end
+
+    it { is_expected.to be_a_kind_of(Integer) }
+    it('captures time with Time.now') { is_expected.to eq(1577836800) }
+  end
+end
