@@ -64,4 +64,20 @@ RSpec.describe Datadog::Core::Telemetry::V1::Integration do
 
     let(:auto_enabled) { false }
     let(:compatible) { true }
-    let(:enabled) 
+    let(:enabled) { false }
+    let(:error) { 'Failed to enable' }
+    let(:name) { 'pg' }
+    let(:version) { '1.7.0' }
+
+    it do
+      is_expected.to eq(
+        auto_enabled: auto_enabled,
+        compatible: compatible,
+        enabled: enabled,
+        error: error,
+        name: name,
+        version: version
+      )
+    end
+  end
+end
