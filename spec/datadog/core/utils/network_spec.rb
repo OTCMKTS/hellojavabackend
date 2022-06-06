@@ -88,4 +88,28 @@ RSpec.describe Datadog::Core::Utils::Network do
             ['[fe80::208:74ff:feda:625c%eth0]:8080', 'fe80::208:74ff:feda:625c'],
           ]
 
-        ips.each do |ip, e
+        ips.each do |ip, expected_result|
+          result = described_class.stripped_ip(ip)
+          expect(result).to eq(expected_result)
+        end
+      end
+    end
+
+    context 'invalid IP' do
+      it 'returns nil' do
+        ips =
+          [
+            '',
+            'dd',
+            '02001:0000:1234:0000:0000:C1C0:ABCD:0876',
+            '2001:0000:1234:0000:00001:C1C0:ABCD:0876'
+          ]
+
+        ips.each do |ip|
+          result = described_class.stripped_ip(ip)
+          expect(result).to be_nil
+        end
+      end
+    end
+  end
+end
