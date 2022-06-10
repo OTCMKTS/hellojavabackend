@@ -91,4 +91,184 @@ RSpec.describe Datadog::Core::Workers::RuntimeMetrics do
       before do
         worker.enabled = false
         allow(worker).to receive(:perform)
-        allow(worker).to re
+        allow(worker).to receive(:stop)
+      end
+
+      context 'and given true' do
+        let(:value) { true }
+
+        it 'starts the worker' do
+          expect { set_enabled_value }
+            .to change { worker.enabled? }
+            .from(false)
+            .to(true)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+
+      context 'and given false' do
+        let(:value) { false }
+
+        it 'does nothing' do
+          expect { set_enabled_value }
+            .to_not change { worker.enabled? }
+            .from(false)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+
+      context 'and given nil' do
+        let(:value) { nil }
+
+        it 'does nothing' do
+          expect { set_enabled_value }
+            .to_not change { worker.enabled? }
+            .from(false)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+    end
+
+    context 'when already running' do
+      before do
+        worker.enabled = true
+        allow(worker).to receive(:perform)
+        allow(worker).to receive(:stop)
+      end
+
+      context 'and given true' do
+        let(:value) { true }
+
+        it 'does nothing' do
+          expect { set_enabled_value }
+            .to_not change { worker.enabled? }
+            .from(true)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+
+      context 'and given false' do
+        let(:value) { false }
+
+        it 'stops the worker' do
+          expect { set_enabled_value }
+            .to change { worker.enabled? }
+            .from(true)
+            .to(false)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+
+      context 'and given nil' do
+        let(:value) { nil }
+
+        it 'stops the worker' do
+          expect { set_enabled_value }
+            .to change { worker.enabled? }
+            .from(true)
+            .to(false)
+
+          expect(worker).to_not have_received(:perform)
+          expect(worker).to_not have_received(:stop)
+        end
+      end
+    end
+  end
+
+  describe '#register_service' do
+    subject(:register_service) { worker.register_service(service) }
+
+    let(:service) { instance_double(String) }
+
+    before do
+      allow(worker.metrics).to receive(:register_service)
+      allow(worker).to receive(:perform)
+    end
+
+    it 'forwards to #metrics' do
+      register_service
+
+      expect(worker.metrics).to have_received(:register_service)
+        .with(service)
+      expect(worker).to have_received(:perform)
+    end
+  end
+
+  describe '#stop' do
+    subject(:stop) { worker.stop(*args, **kwargs) }
+
+    let(:args) { %w[foo bar] }
+    let(:kwargs) { {} }
+
+    before do
+      allow(worker.metrics).to receive(:close)
+    end
+
+    it 'closes metrics and stops worker' do
+      stop
+
+      expect(worker.enabled?).to be(false)
+      expect(worker.running?).to be(false)
+      expect(worker.metrics).to have_received(:close)
+    end
+
+    context 'with close_metrics: false' do
+      let(:kwargs) { { close_metrics: false } }
+
+      it 'does not close metrics, but stops worker' do
+        stop
+
+        expect(worker.running?).to be(false)
+        expect(worker.metrics).to_not have_received(:close)
+      end
+    end
+
+    context 'with async thread not started' do
+      it 'does not lazily initialize stopped worker' do
+        expect(worker.running?).to be(false)
+
+        stop
+
+        # Try to initialize async thread
+        worker.perform
+
+        expect(worker.running?).to be(false)
+      end
+    end
+  end
+
+  describe 'forwarded methods' do
+    describe '#register_service' do
+      subject(:register_service) { worker.register_service(service) }
+
+      let(:service) { double('service') }
+
+      before { allow(worker.metrics).to receive(:register_service) }
+      after { worker.stop(true) }
+
+      it 'forwards to #metrics' do
+        register_service
+        expect(worker.metrics).to have_received(:register_service)
+          .with(service)
+      end
+    end
+  end
+
+  describe 'integration tests', :integration do
+    describe 'interval' do
+      let(:default_flush_interval) { 0.01 }
+
+      before do
+        stub_const(
+          'Datadog::Core::Workers::RuntimeMetrics::DEFAULT_FLUSH_INTERVAL',
+          default_
