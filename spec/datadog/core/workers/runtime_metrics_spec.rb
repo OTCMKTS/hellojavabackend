@@ -271,4 +271,84 @@ RSpec.describe Datadog::Core::Workers::RuntimeMetrics do
       before do
         stub_const(
           'Datadog::Core::Workers::RuntimeMetrics::DEFAULT_FLUSH_INTERVAL',
-          default_
+          default_flush_interval
+        )
+      end
+
+      after { worker.stop }
+
+      it 'produces metrics every interval' do
+        worker.perform
+
+        # Metrics are produced once right away
+        # and again after an interval.
+        wait_for(metrics).to have_received(:flush).at_least(2).times
+      end
+    end
+
+    describe 'forking' do
+      before { skip 'Fork not supported on current platform' unless Process.respond_to?(:fork) }
+
+      let(:options) do
+        {
+          metrics: metrics,
+          fork_policy: fork_policy,
+          enabled: true
+        }
+      end
+
+      context 'when the process forks' do
+        before { allow(metrics).to receive(:flush) }
+
+        after { worker.stop }
+
+        context 'with FORK_POLICY_STOP fork policy' do
+          let(:fork_policy) { Datadog::Core::Workers::Async::Thread::FORK_POLICY_STOP }
+
+          it 'does not produce metrics' do
+            # Start worker in main process
+            worker.perform
+
+            expect_in_fork do
+              # Capture the flush
+              @flushed = false
+              allow(metrics).to receive(:flush) do
+                @flushed = true
+              end
+
+              # Attempt restart of worker & verify it stops.
+              expect { worker.perform }.to change { worker.run_async? }
+                .from(true)
+                .to(false)
+            end
+          end
+        end
+
+        context 'with FORK_POLICY_RESTART fork policy' do
+          let(:fork_policy) { Datadog::Core::Workers::Async::Thread::FORK_POLICY_RESTART }
+
+          it 'continues producing metrics' do
+            # Start worker
+            worker.perform
+
+            expect_in_fork do
+              # Capture the flush
+              @flushed = false
+              allow(metrics).to receive(:flush) do
+                @flushed = true
+              end
+
+              # Restart worker & wait
+              worker.perform
+              try_wait_until(seconds: 3) { @flushed }
+
+              # Verify state of the worker
+              expect(worker.error?).to be false
+              expect(metrics).to have_received(:flush).at_least(:once)
+            end
+          end
+        end
+      end
+    end
+  end
+end
