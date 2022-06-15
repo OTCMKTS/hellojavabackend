@@ -61,4 +61,83 @@ RSpec.describe Datadog::OpenTracer::DistributedHeaders do
         let(:value) { (Datadog::Tracing::Utils::EXTERNAL_MAX_ID + 1).to_s }
 
         it { is_expected.to be nil }
-      en
+      end
+
+      context 'and the value is in range' do
+        let(:value) { (Datadog::Tracing::Utils::EXTERNAL_MAX_ID - 1).to_s }
+
+        it { is_expected.to eq value.to_i }
+
+        context 'as a negative signed integer' do
+          # Convert signed int to unsigned int.
+          let(:value) { -8809075535603237910.to_s }
+
+          it { is_expected.to eq 9637668538106313706 }
+        end
+      end
+    end
+  end
+
+  describe '#parent_id' do
+    subject(:trace_id) { headers.parent_id }
+
+    before do
+      allow(carrier).to receive(:[])
+        .with('x-datadog-parent-id')
+        .and_return(value)
+    end
+
+    context 'when the header is missing' do
+      let(:value) { nil }
+    end
+
+    context 'when the header is present' do
+      context 'but the value is out of range' do
+        let(:value) { (Datadog::Tracing::Utils::EXTERNAL_MAX_ID + 1).to_s }
+
+        it { is_expected.to be nil }
+      end
+
+      context 'and the value is in range' do
+        let(:value) { (Datadog::Tracing::Utils::EXTERNAL_MAX_ID - 1).to_s }
+
+        it { is_expected.to eq value.to_i }
+
+        context 'as a negative signed integer' do
+          # Convert signed int to unsigned int.
+          let(:value) { -8809075535603237910.to_s }
+
+          it { is_expected.to eq 9637668538106313706 }
+        end
+      end
+    end
+  end
+
+  describe '#sampling_priority' do
+    subject(:trace_id) { headers.sampling_priority }
+
+    before do
+      allow(carrier).to receive(:[])
+        .with('x-datadog-sampling-priority')
+        .and_return(value)
+    end
+
+    context 'when the header is missing' do
+      let(:value) { nil }
+    end
+
+    context 'when the header is present' do
+      context 'but the value is out of range' do
+        let(:value) { '-1' }
+
+        it { is_expected.to be nil }
+      end
+
+      context 'and the value is in range' do
+        let(:value) { '1' }
+
+        it { is_expected.to eq value.to_i }
+      end
+    end
+  end
+end
