@@ -79,4 +79,9 @@ RSpec.describe Datadog::Profiling::Collectors::DynamicSamplingRate do
       end
     end
 
-    context 'when current_monotonic_wall_time_ns i
+    context 'when current_monotonic_wall_time_ns is after next_sample_after_monotonic_wall_time_ns' do
+      let(:current_monotonic_wall_time_ns) { next_sample_after_monotonic_wall_time_ns + 1 }
+      it { is_expected.to be 0 }
+    end
+  end
+end
