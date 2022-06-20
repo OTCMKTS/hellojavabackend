@@ -184,4 +184,8 @@ RSpec.describe Datadog::Profiling::Collectors::CodeProvenance do
       )
     end
 
-    it 'renders the list of loaded libraries using the expected sch
+    it 'renders the list of loaded libraries using the expected schema' do
+      JSON::Validator.validate!(code_provenance_schema, code_provenance.generate_json)
+    end
+  end
+end
