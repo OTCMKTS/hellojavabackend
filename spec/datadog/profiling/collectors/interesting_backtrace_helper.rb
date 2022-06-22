@@ -126,4 +126,82 @@ module IbhMoreGlobals
   end.new
 
   $ibh_anonymous_module = Module.new do
-    d
+    def self.hello
+      $ibh_anonymous_instance.hello
+    end
+  end
+end
+
+def ibh_method_with_complex_parameters(a, b = nil, *c, (d), f:, g: nil, **h, &i)
+  d.to_s # Dummy call to avoid warning on legacy Rubies
+  $ibh_anonymous_module.hello
+end
+
+class IbhClassJ
+  def hello_helper
+    yield
+  end
+
+  def hello
+    hello_helper do
+      hello_helper do
+        ibh_method_with_complex_parameters(0, 1, 2, [3, 4], f: 5, g: 6, h: 7, &proc {})
+      end
+    end
+  end
+end
+
+class IbhClassK
+  def hello
+    eval("IbhClassJ.new.hello", binding, __FILE__, __LINE__)
+  end
+end
+
+class IbhClassL
+  def hello
+    IbhClassK.new.send(:instance_eval, "hello")
+  end
+end
+
+class IbhClassM
+  def hello
+    IbhClassL.new.send(:eval, "hello")
+  end
+end
+
+IbhClassN = Class.new do
+  define_method(:hello) do
+    1.times {
+      IbhClassM.new.hello
+    }
+  end
+end
+
+def ibh_subclass_of_anonymous_class
+  c1 = Class.new(Array)
+  c2 = Class.new(c1) do
+    def hello
+      [nil].map { IbhClassN.new.hello }.first
+    end
+  end
+
+  c2.new.hello
+end
+
+module IbhModuleO
+  module_function
+
+  def hello
+    ibh_subclass_of_anonymous_class
+  end
+end
+
+def ibh_top_level_hello
+  IbhModuleO.hello
+end
+
+1.times {
+  1.times {
+    eval("ibh_top_level_hello()")
+  }
+}
