@@ -243,4 +243,145 @@ RSpec.describe Datadog::Profiling::Collectors::OldStack do
     context 'when the thread' do
       let(:thread) { instance_double(Thread, alive?: alive?) }
       let(:threads) { [thread] }
-      let(:alive?) { tru
+      let(:alive?) { true }
+
+      context 'is dead' do
+        let(:alive?) { false }
+
+        it 'skips the thread' do
+          expect(collector).to_not receive(:collect_thread_event)
+          is_expected.to be_empty
+          expect(recorder).to_not have_received(:push)
+        end
+      end
+
+      context 'is ignored' do
+        let(:options) { { **super(), ignore_thread: ->(t) { t == thread } } }
+
+        it 'skips the thread' do
+          expect(collector).to_not receive(:collect_thread_event)
+          is_expected.to be_empty
+          expect(recorder).to_not have_received(:push)
+        end
+      end
+
+      context "doesn't have an associated event" do
+        before do
+          expect(collector).to receive(:collect_thread_event).and_return(nil)
+        end
+
+        it 'no event is produced' do
+          is_expected.to be_empty
+          expect(recorder).to_not have_received(:push)
+        end
+      end
+
+      context 'produces an event' do
+        let(:event) { instance_double(Datadog::Profiling::Events::StackSample) }
+
+        before do
+          expect(collector).to receive(:collect_thread_event).and_return(event)
+        end
+
+        it 'records the event' do
+          is_expected.to eq([event])
+          expect(recorder).to have_received(:push).with([event])
+        end
+      end
+    end
+  end
+
+  describe '#collect_thread_event' do
+    subject(:collect_events) { collector.collect_thread_event(thread, current_wall_time) }
+
+    let(:options) do
+      { **super(), cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: nil) }
+    end
+    let(:thread) { double('Thread', backtrace_locations: backtrace) }
+    let(:last_wall_time) { 42 }
+    let(:current_wall_time) { 123 }
+
+    context 'when the backtrace is nil' do
+      let(:backtrace) { nil }
+
+      it { is_expected.to be nil }
+    end
+
+    context 'when the backtrace is not nil' do
+      let(:backtrace) do
+        Array.new(backtrace_size) do
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: base_label,
+            lineno: lineno,
+            path: path
+          )
+        end
+      end
+
+      let(:base_label) { double('base_label') }
+      let(:lineno) { double('lineno') }
+      let(:path) { double('path') }
+      let(:trace_identifiers) { nil }
+
+      let(:backtrace_size) { collector.max_frames }
+
+      before do
+        expect(trace_identifiers_helper).to receive(:trace_identifiers_for).with(thread).and_return(trace_identifiers)
+
+        allow(thread)
+          .to receive(:thread_variable_get).with(described_class::THREAD_LAST_WALL_CLOCK_KEY).and_return(last_wall_time)
+        allow(thread).to receive(:thread_variable_set).with(described_class::THREAD_LAST_WALL_CLOCK_KEY, anything)
+      end
+
+      it 'updates the last wall clock value for the thread with the current_wall_time' do
+        expect(thread).to receive(:thread_variable_set).with(described_class::THREAD_LAST_WALL_CLOCK_KEY, current_wall_time)
+
+        collect_events
+      end
+
+      context 'and there is an active trace for the thread' do
+        let(:trace_identifiers) { [root_span_id, span_id] }
+
+        let(:root_span_id) { rand(1e12) }
+        let(:span_id) { rand(1e12) }
+
+        it 'builds an event including the root span id and span id' do
+          is_expected.to have_attributes(
+            root_span_id: root_span_id,
+            span_id: span_id,
+            trace_resource: nil
+          )
+        end
+
+        context 'and a trace_resource is provided' do
+          let(:trace_identifiers) { [root_span_id, span_id, trace_resource] }
+
+          let(:trace_resource) { double('trace resource') }
+
+          it 'builds an event including the root span id, span id, and trace_resource' do
+            is_expected.to have_attributes(
+              root_span_id: root_span_id,
+              span_id: span_id,
+              trace_resource: trace_resource
+            )
+          end
+        end
+      end
+
+      context 'and there is no active trace for the thread' do
+        let(:trace_identifiers) { nil }
+
+        it 'builds an event with nil root span id and span id' do
+          is_expected.to have_attributes(
+            root_span_id: nil,
+            span_id: nil
+          )
+        end
+      end
+
+      context 'and CPU timing is unavailable' do
+        let(:options) do
+          { **super(), cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: nil) }
+        end
+
