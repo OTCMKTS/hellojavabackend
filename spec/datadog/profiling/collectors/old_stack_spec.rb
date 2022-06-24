@@ -513,4 +513,165 @@ RSpec.describe Datadog::Profiling::Collectors::OldStack do
           cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: current_cpu_time) }
       end
 
-      let(:current_cpu_time) { last_cpu_ti
+      let(:current_cpu_time) { last_cpu_time + cpu_interval }
+      let(:last_cpu_time) { rand(1e4) }
+      let(:cpu_interval) { 1000 }
+
+      before do
+        expect(thread)
+          .to receive(:thread_variable_set)
+          .with(described_class::THREAD_LAST_CPU_TIME_KEY, current_cpu_time)
+      end
+
+      context 'and the thread CPU time has not been retrieved before' do
+        before do
+          expect(thread)
+            .to receive(:thread_variable_get)
+            .with(described_class::THREAD_LAST_CPU_TIME_KEY)
+            .and_return(nil)
+        end
+
+        let(:current_cpu_time) { rand(1e4) }
+
+        it { is_expected.to be 0 }
+      end
+
+      context 'and the thread CPU time has been retrieved before' do
+        let(:current_cpu_time) { last_cpu_time + cpu_interval }
+        let(:last_cpu_time) { rand(1e4) }
+        let(:cpu_interval) { 1000 }
+
+        before do
+          expect(thread)
+            .to receive(:thread_variable_get)
+            .with(described_class::THREAD_LAST_CPU_TIME_KEY)
+            .and_return(last_cpu_time)
+        end
+
+        it { is_expected.to eq(cpu_interval) }
+      end
+    end
+  end
+
+  describe '#compute_wait_time' do
+    subject(:compute_wait_time) { collector.compute_wait_time(used_time) }
+
+    let(:used_time) { 1 }
+
+    context 'when max time usage' do
+      let(:options) { { **super(), max_time_usage_pct: max_time_usage_pct } }
+
+      context 'is 100%' do
+        let(:max_time_usage_pct) { 100.0 }
+
+        it 'doesn\'t drop below the min interval' do
+          is_expected.to eq described_class::MIN_INTERVAL
+        end
+      end
+
+      context 'is 50%' do
+        let(:max_time_usage_pct) { 50.0 }
+
+        it { is_expected.to eq 1.0 }
+      end
+
+      context 'is 2%' do
+        let(:max_time_usage_pct) { 2.0 }
+
+        it { is_expected.to eq 49.0 }
+      end
+    end
+  end
+
+  describe '#convert_backtrace_locations' do
+    subject(:convert_backtrace_locations) { collector.convert_backtrace_locations(backtrace) }
+
+    context 'given backtrace containing identical frames' do
+      let(:backtrace) do
+        [
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: 'to_s',
+            lineno: 15,
+            path: 'path/to/file.rb'
+          ),
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: 'to_s',
+            lineno: 15,
+            path: 'path/to/file.rb'
+          )
+        ]
+      end
+
+      it 'reuses the same frame and strings' do
+        locations = convert_backtrace_locations
+
+        expect(locations).to have(2).items
+        expect(locations[0]).to be(locations[1])
+        expect(locations[0].base_label).to be(locations[1].base_label)
+        expect(locations[0].path).to be(locations[1].path)
+      end
+    end
+
+    context 'given backtrace containing unique frames' do
+      let(:backtrace) do
+        [
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: 'to_s',
+            lineno: 15,
+            path: 'path/to/file.rb'
+          ),
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: 'initialize',
+            lineno: 7,
+            path: 'path/to/file.rb'
+          )
+        ]
+      end
+
+      it 'uses different frames but same strings' do
+        locations = convert_backtrace_locations
+
+        expect(locations).to have(2).items
+        expect(locations[0]).to_not be(locations[1])
+        expect(locations[0].base_label).to_not be(locations[1].base_label)
+        expect(locations[0].path).to be(locations[1].path)
+      end
+    end
+
+    context 'when the cache already contains an identical frame' do
+      let(:backtrace) do
+        [
+          instance_double(
+            Thread::Backtrace::Location,
+            base_label: 'to_s',
+            lineno: 15,
+            path: 'path/to/file.rb'
+          )
+        ]
+      end
+
+      before do
+        # Add frame to cache
+        @original_frame = backtrace_location_cache.fetch(
+          string_table.fetch_string(backtrace.first.base_label),
+          backtrace.first.lineno,
+          string_table.fetch_string(backtrace.first.path)
+        ) do |_id, base_label, lineno, path|
+          Datadog::Profiling::BacktraceLocation.new(
+            base_label,
+            lineno,
+            path
+          )
+        end
+      end
+
+      it 'reuses the same frame and strings' do
+        locations = convert_backtrace_locations
+
+        expect(locations).to have(1).items
+        expect(locations[0]).to be(@original_frame)
+        expect(locations[0].base_label).to be(@o
