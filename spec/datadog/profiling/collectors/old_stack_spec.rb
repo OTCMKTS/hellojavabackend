@@ -674,4 +674,96 @@ RSpec.describe Datadog::Profiling::Collectors::OldStack do
 
         expect(locations).to have(1).items
         expect(locations[0]).to be(@original_frame)
-        expect(locations[0].base_label).to be(@o
+        expect(locations[0].base_label).to be(@original_frame.base_label)
+        expect(locations[0].path).to be(@original_frame.path)
+      end
+    end
+  end
+
+  describe '#build_backtrace_location' do
+    subject(:build_backtrace_location) do
+      collector.build_backtrace_location(
+        id,
+        base_label,
+        lineno,
+        path
+      )
+    end
+
+    let(:id) { double('id') }
+    let(:base_label) { double('base_label') }
+    let(:lineno) { double('lineno') }
+    let(:path) { double('path') }
+
+    it { is_expected.to be_a_kind_of(Datadog::Profiling::BacktraceLocation) }
+
+    it do
+      is_expected.to have_attributes(
+        base_label: base_label.to_s,
+        lineno: lineno,
+        path: path.to_s
+      )
+    end
+
+    context 'when strings' do
+      context 'exist in the string table' do
+        let!(:string_table_base_label) { string_table.fetch_string(base_label.to_s) }
+        let!(:string_table_path) { string_table.fetch_string(path.to_s) }
+
+        it 'reuses strings' do
+          backtrace_location = build_backtrace_location
+          expect(backtrace_location.base_label).to be string_table_base_label
+          expect(backtrace_location.path).to be string_table_path
+        end
+      end
+    end
+  end
+
+  describe '#get_current_wall_time_timestamp_ns' do
+    subject(:get_current_wall_time_timestamp_ns) { collector.send(:get_current_wall_time_timestamp_ns) }
+
+    # Must always be an Integer, as pprof does not allow for non-integer floating point values
+    it { is_expected.to be_a_kind_of(Integer) }
+  end
+
+  describe 'Process::Waiter crash regression tests' do
+    # Related to https://bugs.ruby-lang.org/issues/17807 ; see comments on main class for details
+
+    let(:process_waiter_thread) { Process.detach(0) }
+
+    describe 'the crash' do
+      # Let's not get surprised if this shows up in other Ruby versions
+
+      it 'does not affect Ruby >= 2.7' do
+        skip('Test case only applies to Ruby >= 2.7') unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('2.7')
+
+        expect_in_fork do
+          expect(process_waiter_thread.instance_variable_get(:@hello)).to be nil
+        end
+      end
+
+      it 'affects Ruby < 2.7' do
+        skip('Test case only applies to Ruby < 2.7') unless Gem::Version.new(RUBY_VERSION) < Gem::Version.new('2.7')
+
+        expect_in_fork(
+          fork_expectations: proc do |status:, stdout:, stderr:|
+            expect(Signal.signame(status.termsig)).to eq('SEGV').or eq('ABRT')
+            expect(stderr).to include('[BUG] Segmentation fault')
+          end
+        ) do
+          process_waiter_thread.instance_variable_get(:@hello)
+        end
+      end
+    end
+  end
+
+  describe '#reset_after_fork' do
+    subject(:reset_after_fork) { collector.reset_after_fork }
+
+    it 'resets the recorder' do
+      expect(recorder).to receive(:reset_after_fork)
+
+      reset_after_fork
+    end
+  end
+end
