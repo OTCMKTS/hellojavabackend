@@ -385,3 +385,132 @@ RSpec.describe Datadog::Profiling::Collectors::OldStack do
           { **super(), cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: nil) }
         end
 
+        it 'builds an event without CPU time' do
+          is_expected.to be_a_kind_of(Datadog::Profiling::Events::StackSample)
+
+          is_expected.to have_attributes(
+            timestamp: kind_of(Float),
+            frames: array_including(kind_of(Datadog::Profiling::BacktraceLocation)),
+            total_frame_count: backtrace.length,
+            thread_id: thread.object_id,
+            cpu_time_interval_ns: nil,
+            wall_time_interval_ns: current_wall_time - last_wall_time
+          )
+        end
+      end
+
+      context 'and CPU timing is available' do
+        let(:options) do
+          { **super(),
+            cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: current_cpu_time) }
+        end
+
+        let(:current_cpu_time) { last_cpu_time + cpu_interval }
+        let(:last_cpu_time) { rand(1e4) }
+        let(:cpu_interval) { 1000 }
+
+        before do
+          expect(thread)
+            .to receive(:thread_variable_get)
+            .with(described_class::THREAD_LAST_CPU_TIME_KEY)
+            .and_return(last_cpu_time)
+
+          expect(thread)
+            .to receive(:thread_variable_set)
+            .with(described_class::THREAD_LAST_CPU_TIME_KEY, current_cpu_time)
+        end
+
+        it 'builds an event with CPU time' do
+          is_expected.to be_a_kind_of(Datadog::Profiling::Events::StackSample)
+
+          is_expected.to have_attributes(
+            timestamp: kind_of(Float),
+            frames: array_including(kind_of(Datadog::Profiling::BacktraceLocation)),
+            total_frame_count: backtrace.length,
+            thread_id: thread.object_id,
+            cpu_time_interval_ns: cpu_interval,
+            wall_time_interval_ns: current_wall_time - last_wall_time
+          )
+        end
+      end
+
+      context 'but is over the maximum length' do
+        let(:backtrace_size) { collector.max_frames * 2 }
+
+        it 'constrains the size of the backtrace' do
+          is_expected.to have_attributes(total_frame_count: backtrace.length)
+
+          collect_events.frames.tap do |frames|
+            expect(frames).to be_a_kind_of(Array)
+            expect(frames.length).to eq(collector.max_frames)
+          end
+        end
+      end
+
+      context 'and max_frames is 0' do
+        let(:options) { { **super(), max_frames: 0 } }
+        let(:backtrace_size) { 500 }
+
+        it 'does not constrain the size of the backtrace' do
+          is_expected.to have_attributes(total_frame_count: backtrace.length)
+
+          collect_events.frames.tap do |frames|
+            expect(frames).to be_a_kind_of(Array)
+            expect(frames.length).to eq(backtrace.length)
+          end
+        end
+      end
+
+      context 'when the backtrace is empty' do
+        let(:backtrace) { [] }
+
+        it 'builds an event that includes a includes a synthetic placeholder frame to mark execution in native code' do
+          is_expected.to have_attributes(
+            total_frame_count: 1,
+            frames: [Datadog::Profiling::BacktraceLocation.new('', 0, 'In native code')],
+            timestamp: kind_of(Float),
+            thread_id: thread.object_id,
+            wall_time_interval_ns: current_wall_time - last_wall_time,
+          )
+        end
+      end
+    end
+
+    context 'Process::Waiter crash regression tests' do
+      before do
+        skip 'Test case only applies to MRI Ruby' if RUBY_ENGINE != 'ruby'
+      end
+
+      it 'can sample an instance of Process::Waiter without crashing' do
+        expect_in_fork do
+          forked_process = fork { sleep }
+          process_waiter_thread = Process.detach(forked_process)
+
+          expect(collector.collect_thread_event(process_waiter_thread, 0)).to be_truthy
+
+          Process.kill('TERM', forked_process)
+        end
+      end
+    end
+  end
+
+  describe '#get_cpu_time_interval!' do
+    subject(:get_cpu_time_interval!) { collector.get_cpu_time_interval!(thread) }
+
+    let(:thread) { double('Thread') }
+
+    context 'when CPU timing is not supported or available' do
+      let(:options) do
+        { **super(), cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: nil) }
+      end
+
+      it { is_expected.to be nil }
+    end
+
+    context 'when CPU timing is available' do
+      let(:options) do
+        { **super(),
+          cpu_time_provider: class_double(Datadog::Profiling::NativeExtension, cpu_time_ns_for: current_cpu_time) }
+      end
+
+      let(:current_cpu_time) { last_cpu_ti
