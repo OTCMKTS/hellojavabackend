@@ -104,4 +104,166 @@ RSpec.describe Datadog::Profiling::Ext::Forking do
         allow(Kernel).to receive(:fork) do |*_args, &b|
           b.call unless b.nil?
           fork_result
-        en
+        end
+      end
+    end
+
+    shared_context 'at_fork callbacks' do
+      let(:child) { double('child') }
+
+      before do
+        fork_class.at_fork(:child) { child.call }
+      end
+
+      after do
+        described_class.ddtrace_at_fork_blocks.clear
+      end
+    end
+
+    context 'when applied to a class with forking' do
+      include_context 'fork class'
+
+      it do
+        is_expected.to respond_to(:fork)
+        is_expected.to respond_to(:at_fork)
+      end
+
+      describe '#fork' do
+        context 'when a block is not provided' do
+          include_context 'at_fork callbacks'
+
+          subject(:fork) { fork_class.fork }
+
+          context 'and returns from the parent context' do
+            # By setting the fork result = integer, we're
+            # simulating #fork running in the parent process.
+            let(:fork_result) { rand(100) }
+
+            it do
+              expect(child).to_not receive(:call)
+
+              is_expected.to be fork_result
+            end
+          end
+
+          context 'and returns from the child context' do
+            # By setting the fork result = nil, we're
+            # simulating #fork running in the child process.
+            let(:fork_result) { nil }
+
+            it do
+              expect(child).to receive(:call)
+
+              is_expected.to be nil
+            end
+          end
+        end
+
+        context 'when a block is provided' do
+          subject(:fork) { fork_class.fork(&block) }
+
+          let(:block) { proc {} }
+
+          context 'when no callbacks are configured' do
+            it 'passes through to original #fork' do
+              expect { |b| fork_class.fork(&b) }.to yield_control
+              is_expected.to be fork_result
+            end
+          end
+
+          context 'when callbacks are configured' do
+            include_context 'at_fork callbacks'
+
+            it 'invokes all the callbacks in order' do
+              expect(child).to receive(:call)
+
+              is_expected.to be fork_result
+            end
+          end
+        end
+      end
+
+      describe '#at_fork' do
+        include_context 'at_fork callbacks'
+
+        let(:callback) { double('callback') }
+        let(:block) { proc { callback.call } }
+
+        context 'given a stage' do
+          subject(:at_fork) do
+            fork_class.at_fork(stage, &block)
+          end
+
+          context ':child' do
+            let(:stage) { :child }
+
+            it 'adds a child callback' do
+              at_fork
+
+              expect(child).to receive(:call).ordered
+              expect(callback).to receive(:call).ordered
+
+              fork_class.fork {}
+            end
+          end
+        end
+      end
+    end
+
+    context 'when applied to multiple classes with forking' do
+      include_context 'fork class'
+
+      let(:other_fork_class) { new_fork_class }
+
+      context 'and #at_fork is called in one' do
+        include_context 'at_fork callbacks'
+
+        it 'applies the callback to the original class' do
+          expect(child).to receive(:call)
+
+          fork_class.fork {}
+        end
+
+        it 'applies the callback to the other class' do
+          expect(child).to receive(:call)
+
+          other_fork_class.fork {}
+        end
+      end
+    end
+  end
+
+  describe Datadog::Profiling::Ext::Forking::ProcessDaemonPatch do
+    let(:process_module) { Module.new { def self.daemon(nochdir = nil, noclose = nil); end } }
+    let(:child_callback) { double('child', call: true) }
+
+    before do
+      allow(process_module).to receive(:daemon)
+
+      process_module.singleton_class.prepend(Datadog::Profiling::Ext::Forking::Kernel)
+      process_module.singleton_class.prepend(described_class)
+
+      process_module.at_fork(:child) { child_callback.call }
+    end
+
+    after do
+      Datadog::Profiling::Ext::Forking::Kernel.ddtrace_at_fork_blocks.clear
+    end
+
+    it 'calls the child at_fork callbacks after calling Process.daemon' do
+      expect(process_module).to receive(:daemon).ordered
+      expect(child_callback).to receive(:call).ordered
+
+      process_module.daemon
+    end
+
+    it 'passes any arguments to Process.daemon' do
+      expect(process_module).to receive(:daemon).with(true, true)
+
+      process_module.daemon(true, true)
+    end
+
+    it 'returns the result of calling Process.daemon' do
+      expect(process_module).to receive(:daemon).and_return(:process_daemon_result)
+
+      expect(process_module.daemon).to be :process_daemo
