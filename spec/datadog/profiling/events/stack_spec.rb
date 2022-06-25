@@ -71,4 +71,13 @@ RSpec.describe Datadog::Profiling::Events do
           frames: frames,
           total_frame_count: total_frame_count,
           thread_id: thread_id,
-   
+          root_span_id: root_span_id,
+          span_id: span_id,
+          trace_resource: trace_resource,
+          cpu_time_interval_ns: cpu_time_interval_ns,
+          wall_time_interval_ns: wall_time_interval_ns
+        )
+      end
+    end
+  end
+end
