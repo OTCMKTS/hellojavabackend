@@ -245,4 +245,128 @@ RSpec.describe Datadog::Profiling::HttpTransport do
       end
       let(:hostname) { '127.0.0.1' }
       let(:port) { 6006 }
-  
+      let(:log) { WEBrick::Log.new($stderr, WEBrick::Log::WARN) }
+      let(:access_log_buffer) { StringIO.new }
+      let(:access_log) { [[access_log_buffer, WEBrick::AccessLog::COMBINED_LOG_FORMAT]] }
+      let(:server_proc) do
+        proc do |req, res|
+          messages << req.tap { req.body } # Read body, store message before socket closes.
+          res.body = '{}'
+        end
+      end
+      let(:init_signal) { Queue.new }
+
+      let(:messages) { [] }
+
+      before do
+        server.mount_proc('/', &server_proc)
+        @server_thread = Thread.new { server.start }
+        init_signal.pop
+      end
+
+      after do
+        unless RSpec.current_example.skipped?
+          # When the test is skipped, server has not been initialized and @server_thread would be nil; thus we only
+          # want to touch them when the test actually run, otherwise we would cause the server to start (incorrectly)
+          # and join to be called on a nil @server_thread
+          server.shutdown
+          @server_thread.join
+        end
+      end
+    end
+
+    include_context 'HTTP server'
+
+    let(:request) { messages.first }
+
+    let(:hostname) { '127.0.0.1' }
+    let(:port) { '6006' }
+
+    shared_examples 'correctly reports profiling data' do
+      it 'correctly reports profiling data' do
+        success = http_transport.export(flush)
+
+        expect(success).to be true
+
+        expect(request.header).to include(
+          'content-type' => [%r{^multipart/form-data; boundary=(.+)}],
+          'dd-evp-origin' => ['dd-trace-rb'],
+          'dd-evp-origin-version' => [DDTrace::VERSION::STRING],
+        )
+
+        # check body
+        boundary = request['content-type'][%r{^multipart/form-data; boundary=(.+)}, 1]
+        body = WEBrick::HTTPUtils.parse_form_data(StringIO.new(request.body), boundary)
+        event_data = JSON.parse(body.fetch('event'))
+
+        expect(event_data).to eq(
+          'attachments' => [pprof_file_name, code_provenance_file_name],
+          'tags_profiler' => 'tag_a:value_a,tag_b:value_b',
+          'start' => start_timestamp,
+          'end' => end_timestamp,
+          'family' => 'ruby',
+          'version' => '4',
+          'endpoint_counts' => nil,
+        )
+      end
+
+      it 'reports the payload as lz4-compressed files, that get automatically compressed by libdatadog' do
+        success = http_transport.export(flush)
+
+        expect(success).to be true
+
+        boundary = request['content-type'][%r{^multipart/form-data; boundary=(.+)}, 1]
+        body = WEBrick::HTTPUtils.parse_form_data(StringIO.new(request.body), boundary)
+
+        require 'extlz4' # Lazily required, to avoid trying to load it on JRuby
+
+        expect(LZ4.decode(body.fetch(pprof_file_name))).to eq pprof_data
+        expect(LZ4.decode(body.fetch(code_provenance_file_name))).to eq code_provenance_data
+      end
+    end
+
+    include_examples 'correctly reports profiling data'
+
+    it 'exports data via http to the agent url' do
+      http_transport.export(flush)
+
+      expect(request.request_uri.to_s).to eq 'http://127.0.0.1:6006/profiling/v1/input'
+    end
+
+    context 'when code provenance data is not available' do
+      let(:code_provenance_data) { nil }
+
+      it 'correctly reports profiling data but does not include code provenance' do
+        success = http_transport.export(flush)
+
+        expect(success).to be true
+
+        # check body
+        boundary = request['content-type'][%r{^multipart/form-data; boundary=(.+)}, 1]
+        body = WEBrick::HTTPUtils.parse_form_data(StringIO.new(request.body), boundary)
+        event_data = JSON.parse(body.fetch('event'))
+
+        expect(event_data).to eq(
+          'attachments' => [pprof_file_name],
+          'tags_profiler' => 'tag_a:value_a,tag_b:value_b',
+          'start' => start_timestamp,
+          'end' => end_timestamp,
+          'family' => 'ruby',
+          'version' => '4',
+          'endpoint_counts' => nil,
+        )
+
+        expect(body[code_provenance_file_name]).to be nil
+      end
+    end
+
+    context 'via unix domain socket' do
+      let(:temporary_directory) { Dir.mktmpdir }
+      let(:socket_path) { "#{temporary_directory}/rspec_unix_domain_socket" }
+      let(:unix_domain_socket) { UNIXServer.new(socket_path) } # Closing the socket is handled by webrick
+      let(:server) do
+        server = WEBrick::HTTPServer.new(
+          DoNotListen: true,
+          Logger: log,
+          AccessLog: access_log,
+          StartC
