@@ -93,4 +93,156 @@ RSpec.describe Datadog::Profiling::HttpTransport do
 
       context 'when agent_settings requests a unix domain socket' do
         let(:adapter) { Datadog::Transport::Ext::UnixSocket::ADAPTER }
-        let(:uds_pat
+        let(:uds_path) { '/var/run/datadog/apm.socket' }
+
+        it 'picks the :agent working mode with unix domain stocket reporting' do
+          expect(described_class)
+            .to receive(:_native_validate_exporter)
+            .with([:agent, 'unix:///var/run/datadog/apm.socket'])
+            .and_return([:ok, nil])
+
+          http_transport
+        end
+      end
+
+      context 'when agent_settings includes a deprecated_for_removal_transport_configuration_proc' do
+        let(:deprecated_for_removal_transport_configuration_proc) { instance_double(Proc, 'Configuration proc') }
+
+        it 'logs a warning message' do
+          expect(Datadog.logger).to receive(:warn)
+
+          http_transport
+        end
+
+        it 'picks working mode from the agent_settings object' do
+          allow(Datadog.logger).to receive(:warn)
+
+          expect(described_class)
+            .to receive(:_native_validate_exporter)
+            .with([:agent, 'http://192.168.0.1:12345/'])
+            .and_return([:ok, nil])
+
+          http_transport
+        end
+      end
+
+      context 'when agent_settings requests an unsupported transport' do
+        let(:adapter) { :test }
+
+        it do
+          expect { http_transport }.to raise_error(ArgumentError, /Unsupported transport/)
+        end
+      end
+    end
+
+    context 'when additionally site and api_key are provided' do
+      let(:site) { 'test.datadoghq.com' }
+      let(:api_key) { SecureRandom.uuid }
+
+      it 'ignores them and picks the :agent working mode using the agent_settings' do
+        expect(described_class)
+          .to receive(:_native_validate_exporter)
+          .with([:agent, 'http://192.168.0.1:12345/'])
+          .and_return([:ok, nil])
+
+        http_transport
+      end
+
+      context 'when agentless mode is allowed' do
+        around do |example|
+          ClimateControl.modify('DD_PROFILING_AGENTLESS' => 'true') do
+            example.run
+          end
+        end
+
+        it 'picks the :agentless working mode with the given site and api key' do
+          expect(described_class)
+            .to receive(:_native_validate_exporter)
+            .with([:agentless, site, api_key])
+            .and_return([:ok, nil])
+
+          http_transport
+        end
+      end
+    end
+
+    context 'when an invalid configuration is provided' do
+      let(:hostname) { 'this:is:not:a:valid:hostname!!!!' }
+
+      it do
+        expect { http_transport }.to raise_error(ArgumentError, /Failed to initialize transport/)
+      end
+    end
+  end
+
+  describe '#export' do
+    subject(:export) { http_transport.export(flush) }
+
+    it 'calls the native export method with the data from the flush' do
+      # Manually converted from the lets above :)
+      upload_timeout_milliseconds = 10_000
+      start_timespec_seconds = 1644249593
+      start_timespec_nanoseconds = 987654321
+      finish_timespec_seconds = 1699718400
+      finish_timespec_nanoseconds = 123456789
+
+      expect(described_class).to receive(:_native_do_export).with(
+        kind_of(Array), # exporter_configuration
+        upload_timeout_milliseconds,
+        start_timespec_seconds,
+        start_timespec_nanoseconds,
+        finish_timespec_seconds,
+        finish_timespec_nanoseconds,
+        pprof_file_name,
+        pprof_data,
+        code_provenance_file_name,
+        code_provenance_data,
+        tags_as_array
+      ).and_return([:ok, 200])
+
+      export
+    end
+
+    context 'when successful' do
+      before do
+        expect(described_class).to receive(:_native_do_export).and_return([:ok, 200])
+      end
+
+      it 'logs a debug message' do
+        expect(Datadog.logger).to receive(:debug).with('Successfully reported profiling data')
+
+        export
+      end
+
+      it { is_expected.to be true }
+    end
+
+    context 'when failed' do
+      before do
+        expect(described_class).to receive(:_native_do_export).and_return([:ok, 500])
+        allow(Datadog.logger).to receive(:error)
+      end
+
+      it 'logs an error message' do
+        expect(Datadog.logger).to receive(:error)
+
+        export
+      end
+
+      it { is_expected.to be false }
+    end
+  end
+
+  context 'integration testing' do
+    shared_context 'HTTP server' do
+      let(:server) do
+        WEBrick::HTTPServer.new(
+          Port: port,
+          Logger: log,
+          AccessLog: access_log,
+          StartCallback: -> { init_signal.push(1) }
+        )
+      end
+      let(:hostname) { '127.0.0.1' }
+      let(:port) { 6006 }
+  
