@@ -266,4 +266,7 @@ RSpec.describe Datadog::Profiling::Ext::Forking do
     it 'returns the result of calling Process.daemon' do
       expect(process_module).to receive(:daemon).and_return(:process_daemon_result)
 
-      expect(process_module.daemon).to be :process_daemo
+      expect(process_module.daemon).to be :process_daemon_result
+    end
+  end
+end
