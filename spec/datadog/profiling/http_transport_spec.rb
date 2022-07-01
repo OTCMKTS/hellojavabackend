@@ -369,4 +369,127 @@ RSpec.describe Datadog::Profiling::HttpTransport do
           DoNotListen: true,
           Logger: log,
           AccessLog: access_log,
-          StartC
+          StartCallback: -> { init_signal.push(1) }
+        )
+        server.listeners << unix_domain_socket
+        server
+      end
+      let(:adapter) { Datadog::Transport::Ext::UnixSocket::ADAPTER }
+      let(:uds_path) { socket_path }
+
+      after do
+        begin
+          FileUtils.remove_entry(temporary_directory)
+        rescue Errno::ENOENT => _e
+          # Do nothing, it's ok
+        end
+      end
+
+      include_examples 'correctly reports profiling data'
+    end
+
+    context 'when agent is down' do
+      before do
+        server.shutdown
+        @server_thread.join
+      end
+
+      it 'logs an error' do
+        expect(Datadog.logger).to receive(:error).with(/error trying to connect/)
+
+        http_transport.export(flush)
+      end
+    end
+
+    context 'when request times out' do
+      let(:upload_timeout_seconds) { 0.001 }
+      let(:server_proc) { proc { sleep 0.05 } }
+
+      it 'logs an error' do
+        expect(Datadog.logger).to receive(:error).with(/timed out/)
+
+        http_transport.export(flush)
+      end
+    end
+
+    context 'when server returns a 4xx failure' do
+      let(:server_proc) { proc { |_req, res| res.status = 418 } }
+
+      it 'logs an error' do
+        expect(Datadog.logger).to receive(:error).with(/unexpected HTTP 418/)
+
+        http_transport.export(flush)
+      end
+    end
+
+    context 'when server returns a 5xx failure' do
+      let(:server_proc) { proc { |_req, res| res.status = 503 } }
+
+      it 'logs an error' do
+        expect(Datadog.logger).to receive(:error).with(/unexpected HTTP 503/)
+
+        http_transport.export(flush)
+      end
+    end
+
+    context 'when tags contains invalid tags' do
+      let(:tags_as_array) { [%w[:invalid invalid:], %w[valid1 valid1], %w[valid2 valid2]] }
+
+      before do
+        allow(Datadog.logger).to receive(:warn)
+      end
+
+      it 'reports using the valid tags and ignores the invalid tags' do
+        success = http_transport.export(flush)
+
+        expect(success).to be true
+
+        boundary = request['content-type'][%r{^multipart/form-data; boundary=(.+)}, 1]
+        body = WEBrick::HTTPUtils.parse_form_data(StringIO.new(request.body), boundary)
+        event_data = JSON.parse(body.fetch('event'))
+
+        expect(event_data['tags_profiler']).to eq 'valid1:valid1,valid2:valid2'
+      end
+
+      it 'logs a warning' do
+        expect(Datadog.logger).to receive(:warn).with(/Failed to add tag to profiling request/)
+
+        http_transport.export(flush)
+      end
+    end
+
+    describe 'cancellation behavior' do
+      let!(:request_received_queue) { Queue.new }
+      let!(:request_finish_queue) { Queue.new }
+
+      let(:upload_timeout_seconds) { 123_456_789 } # Set on purpose so this test will either pass or hang
+      let(:server_proc) do
+        proc do
+          request_received_queue << true
+          request_finish_queue.pop
+        end
+      end
+
+      after do
+        request_finish_queue << true
+      end
+
+      # As the describe above says, here we're testing the cancellation behavior. If cancellation is not correctly
+      # implemented, then `ddog_ProfileExporter_send` will block until `upload_timeout_seconds` is hit and
+      # nothing we could do on the Ruby VM side will interrupt it.
+      # If it is correctly implemented, then the `exporter_thread.kill` will cause
+      # `ddog_ProfileExporter_send` to return immediately and this test will quickly finish.
+      it 'can be interrupted' do
+        exporter_thread = Thread.new { http_transport.export(flush) }
+        request_received_queue.pop
+
+        expect(exporter_thread.status).to eq 'sleep'
+
+        exporter_thread.kill
+        exporter_thread.join
+
+        expect(exporter_thread.status).to be false
+      end
+    end
+  end
+end
