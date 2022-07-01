@@ -289,4 +289,118 @@ RSpec.describe 'profiling integration test' do
 
           it 'is well formed with trace and span ID labels' do
             expect(sample.last.to_h).to eq(
-              location_id: stack_samples.last.frames.collect { |f| stack_frame
+              location_id: stack_samples.last.frames.collect { |f| stack_frame_to_location_id(f) },
+              value: [
+                stack_samples[3].cpu_time_interval_ns + stack_samples[4].cpu_time_interval_ns,
+                stack_samples[3].wall_time_interval_ns + stack_samples[4].wall_time_interval_ns
+              ],
+              label: [
+                {
+                  key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_THREAD_ID),
+                  str: string_id_for(stack_samples.last.thread_id.to_s),
+                  num: 0,
+                  num_unit: 0
+                },
+                {
+                  key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_LOCAL_ROOT_SPAN_ID),
+                  str: string_id_for(root_span_id.to_s),
+                  num: 0,
+                  num_unit: 0
+                },
+                {
+                  key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_SPAN_ID),
+                  str: string_id_for(span_id.to_s),
+                  num: 0,
+                  num_unit: 0
+                },
+                {
+                  key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_TRACE_ENDPOINT),
+                  str: string_id_for('example trace resource'),
+                  num: 0,
+                  num_unit: 0
+                }
+              ]
+            )
+          end
+        end
+      end
+
+      describe '#mapping' do
+        subject(:mapping) { profile.mapping }
+
+        it 'is well formed' do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(1).items
+
+          expect(mapping.first.to_h).to eq(
+            build_id: 0,
+            file_offset: 0,
+            filename: string_id_for($PROGRAM_NAME),
+            has_filenames: false,
+            has_functions: false,
+            has_inline_frames: false,
+            has_line_numbers: false,
+            id: 1,
+            memory_limit: 0,
+            memory_start: 0
+          )
+        end
+      end
+
+      describe '#location' do
+        subject(:location) { profile.location }
+
+        it 'is well formed' do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(4).items # both stack_one and stack_two share 2 frames, and have 1 unique frame each
+
+          unique_locations = (stack_one + stack_two).uniq
+
+          location.each_with_index do |loc, i|
+            expect(loc.to_h).to eq(
+              address: 0,
+              id: i + 1,
+              is_folded: false,
+              line: [{
+                function_id: stack_frame_to_function_id(unique_locations[i]),
+                line: unique_locations[i].lineno
+              }],
+              mapping_id: 0
+            )
+          end
+        end
+      end
+
+      describe '#function' do
+        subject(:function) { profile.function }
+
+        it 'is well formed' do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(4).items
+
+          unique_functions = (stack_one + stack_two).uniq { |f| [f.base_label, f.path] }
+
+          function.each_with_index do |loc, i|
+            expect(loc.to_h).to eq(
+              filename: string_id_for(unique_functions[i].path),
+              id: i + 1,
+              name: string_id_for(unique_functions[i].base_label),
+              start_line: 0,
+              system_name: 0
+            )
+          end
+        end
+      end
+
+      describe '#string_table' do
+        subject(:string_table) { profile.string_table }
+
+        it 'is well formed' do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(14).items
+          expect(string_table.first).to eq('')
+        end
+      end
+    end
+  end
+end
