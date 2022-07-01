@@ -164,4 +164,129 @@ RSpec.describe 'profiling integration test' do
   describe 'building a Perftools::Profiles::Profile using Pprof::Template' do
     subject(:build_profile) { template.to_pprof(start: start, finish: finish) }
 
-    let(:template) {
+    let(:template) { Datadog::Profiling::Pprof::Template.for_event_classes(event_classes) }
+    let(:event_classes) { events.keys.uniq }
+    let(:events) do
+      {
+        Datadog::Profiling::Events::StackSample => stack_samples
+      }
+    end
+    let(:start) { Time.now }
+    let(:finish) { start + 60 * 60 }
+
+    def rand_int
+      rand(1e3)
+    end
+
+    def string_id_for(string)
+      template.builder.string_table.fetch(string)
+    end
+
+    include_context 'StackSample events' do
+      def stack_frame_to_location_id(backtrace_location)
+        template.builder.locations.fetch(backtrace_location) { raise 'Unknown stack frame!' }.id
+      end
+
+      def stack_frame_to_function_id(backtrace_location)
+        template.builder.functions.fetch(
+          # Filename
+          backtrace_location.path,
+          # Function name
+          backtrace_location.base_label
+        ) { raise 'Unknown stack frame!' }.id
+      end
+    end
+
+    before do
+      events.each { |event_class, events| template.add_events!(event_class, events) }
+    end
+
+    describe 'yields an encoded profile' do
+      subject(:profile) { Perftools::Profiles::Profile.decode(build_profile.data) }
+
+      it { is_expected.to be_kind_of(Perftools::Profiles::Profile) }
+
+      it 'is well formed' do
+        start_ns = Datadog::Core::Utils::Time.as_utc_epoch_ns(start)
+        finish_ns = Datadog::Core::Utils::Time.as_utc_epoch_ns(finish)
+
+        is_expected.to have_attributes(
+          drop_frames: 0,
+          keep_frames: 0,
+          time_nanos: start_ns,
+          duration_nanos: finish_ns - start_ns,
+          period_type: nil,
+          period: 0,
+          comment: [],
+          default_sample_type: 0
+        )
+      end
+
+      describe '#sample_type' do
+        subject(:sample_type) { profile.sample_type }
+
+        it do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(2).items
+
+          expect(sample_type[0]).to have_attributes(
+            type: string_id_for(Datadog::Profiling::Ext::Pprof::VALUE_TYPE_CPU),
+            unit: string_id_for(Datadog::Profiling::Ext::Pprof::VALUE_UNIT_NANOSECONDS)
+          )
+
+          expect(sample_type[1]).to have_attributes(
+            type: string_id_for(Datadog::Profiling::Ext::Pprof::VALUE_TYPE_WALL),
+            unit: string_id_for(Datadog::Profiling::Ext::Pprof::VALUE_UNIT_NANOSECONDS)
+          )
+        end
+      end
+
+      describe '#sample' do
+        subject(:sample) { profile.sample }
+
+        it 'is well formed' do
+          is_expected.to be_kind_of(Google::Protobuf::RepeatedField)
+          is_expected.to have(4).items
+
+          # All but last are unique
+          (0..-2).each do |i|
+            stack_sample = stack_samples[i]
+
+            expect(sample[i].to_h).to eq(
+              location_id: stack_sample.frames.collect { |f| stack_frame_to_location_id(f) },
+              value: [stack_sample.cpu_time_interval_ns, stack_sample.wall_time_interval_ns],
+              label: [{
+                key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_THREAD_ID),
+                str: string_id_for(stack_sample.thread_id.to_s),
+                num: 0,
+                num_unit: 0
+              }]
+            )
+          end
+
+          # Last one is grouped
+          expect(sample.last.to_h).to eq(
+            location_id: stack_samples.last.frames.collect { |f| stack_frame_to_location_id(f) },
+            value: [
+              stack_samples[3].cpu_time_interval_ns + stack_samples[4].cpu_time_interval_ns,
+              stack_samples[3].wall_time_interval_ns + stack_samples[4].wall_time_interval_ns
+            ],
+            label: [
+              {
+                key: string_id_for(Datadog::Profiling::Ext::Pprof::LABEL_KEY_THREAD_ID),
+                str: string_id_for(stack_samples.last.thread_id.to_s),
+                num: 0,
+                num_unit: 0
+              }
+            ]
+          )
+        end
+
+        context 'when trace and span IDs are available' do
+          let(:root_span_id) { rand(1e9) }
+          let(:span_id) { rand(1e9) }
+          let(:trace_resource) { 'example trace resource' }
+
+          it 'is well formed with trace and span ID labels' do
+            expect(sample.last.to_h).to eq(
+              location_id: stack_samples.last.frames.collect { |f| stack_frame
