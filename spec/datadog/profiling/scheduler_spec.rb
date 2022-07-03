@@ -180,4 +180,34 @@ RSpec.describe Datadog::Profiling::Scheduler do
   end
 
   describe '#loop_wait_before_first_iteration?' do
-    it 'enabl
+    it 'enables this feature of IntervalLoop' do
+      expect(scheduler.loop_wait_before_first_iteration?).to be true
+    end
+  end
+
+  describe '#work_pending?' do
+    subject(:work_pending?) { scheduler.work_pending? }
+
+    context 'when the exporter can flush' do
+      before { expect(exporter).to receive(:can_flush?).and_return(true) }
+
+      it { is_expected.to be true }
+    end
+
+    context 'when the exporter can not flush' do
+      before { expect(exporter).to receive(:can_flush?).and_return(false) }
+
+      it { is_expected.to be false }
+    end
+  end
+
+  describe '#reset_after_fork' do
+    subject(:reset_after_fork) { scheduler.reset_after_fork }
+
+    it 'resets the exporter' do
+      expect(exporter).to receive(:reset_after_fork)
+
+      reset_after_fork
+    end
+  end
+end
