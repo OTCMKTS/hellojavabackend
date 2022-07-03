@@ -32,4 +32,154 @@ RSpec.describe Datadog::Profiling::Tasks::Setup do
 
     it 'only sets up the extensions and hooks once, even across different instances' do
       expect_any_instance_of(described_class).to receive(:activate_forking_extensions).once
-      expect_any_instance_of(described_class).to receive(:
+      expect_any_instance_of(described_class).to receive(:setup_at_fork_hooks).once
+
+      task.run
+      task.run
+      described_class.new.run
+      described_class.new.run
+    end
+  end
+
+  describe '#activate_forking_extensions' do
+    subject(:activate_forking_extensions) { task.send(:activate_forking_extensions) }
+
+    context 'when forking extensions are supported' do
+      before do
+        allow(Datadog::Profiling::Ext::Forking)
+          .to receive(:supported?)
+          .and_return(true)
+      end
+
+      context 'and succeeds' do
+        it 'applies forking extensions' do
+          expect(Datadog::Profiling::Ext::Forking).to receive(:apply!)
+          expect(Datadog.logger).to_not receive(:warn)
+          activate_forking_extensions
+        end
+      end
+
+      context 'but fails' do
+        before do
+          expect(Datadog::Profiling::Ext::Forking)
+            .to receive(:apply!)
+            .and_raise(StandardError)
+        end
+
+        it 'logs a warning' do
+          expect(Datadog.logger).to receive(:warn) do |&message|
+            expect(message.call).to include('forking extensions unavailable')
+          end
+
+          activate_forking_extensions
+        end
+      end
+    end
+
+    context 'when forking extensions are not supported' do
+      before do
+        allow(Datadog::Profiling::Ext::Forking)
+          .to receive(:supported?)
+          .and_return(false)
+      end
+
+      context 'and profiling is enabled' do
+        before do
+          allow(Datadog.configuration.profiling)
+            .to receive(:enabled)
+            .and_return(true)
+        end
+
+        it 'skips forking extensions with warning' do
+          expect(Datadog::Profiling::Ext::Forking).to_not receive(:apply!)
+          expect(Datadog.logger).to receive(:debug) do |message|
+            expect(message).to include('forking extensions skipped')
+          end
+
+          activate_forking_extensions
+        end
+      end
+
+      context 'and profiling is disabled' do
+        before do
+          allow(Datadog.configuration.profiling)
+            .to receive(:enabled)
+            .and_return(false)
+        end
+
+        it 'skips forking extensions without warning' do
+          expect(Datadog::Profiling::Ext::Forking).to_not receive(:apply!)
+          expect(Datadog.logger).to_not receive(:debug)
+          activate_forking_extensions
+        end
+      end
+    end
+  end
+
+  describe '#check_if_cpu_time_profiling_is_supported' do
+    subject(:check_if_cpu_time_profiling_is_supported) { task.send(:check_if_cpu_time_profiling_is_supported) }
+
+    before do
+      expect(task).to receive(:cpu_time_profiling_unsupported_reason).and_return(unsupported_reason)
+    end
+
+    context 'when CPU time profiling is supported' do
+      let(:unsupported_reason) { nil }
+
+      it 'does not log a message' do
+        expect(Datadog.logger).to_not receive(:info)
+
+        check_if_cpu_time_profiling_is_supported
+      end
+    end
+
+    context 'when CPU time profiling is not supported' do
+      let(:unsupported_reason) { 'Simulated failure' }
+
+      it 'logs info message' do
+        expect(Datadog.logger).to receive(:info) do |&message|
+          expect(message.call).to include('CPU time profiling skipped')
+        end
+
+        check_if_cpu_time_profiling_is_supported
+      end
+    end
+  end
+
+  describe '#setup_at_fork_hooks' do
+    subject(:setup_at_fork_hooks) { task.send(:setup_at_fork_hooks) }
+
+    context 'when Process#at_fork is available' do
+      before do
+        allow(Process).to receive(:respond_to?).with(:at_fork).and_return(true)
+        allow(Datadog::Profiling).to receive(:start_if_enabled)
+
+        without_partial_double_verification do
+          allow(Process).to receive(:at_fork)
+        end
+      end
+
+      let(:at_fork_hook) do
+        the_hook = nil
+
+        without_partial_double_verification do
+          expect(Process).to receive(:at_fork).with(:child) do |&block|
+            the_hook = block
+          end
+        end
+
+        setup_at_fork_hooks
+
+        the_hook
+      end
+
+      it 'sets up an at_fork hook that restarts the profiler' do
+        expect(Datadog::Profiling).to receive(:start_if_enabled)
+
+        at_fork_hook.call
+      end
+
+      context 'when there is an issue starting the profiler' do
+        before do
+          expect(Datadog::Profiling).to receive(:start_if_enabled).and_raise('Dummy exception')
+ 
