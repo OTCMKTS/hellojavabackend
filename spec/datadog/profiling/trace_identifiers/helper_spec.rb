@@ -66,4 +66,21 @@ RSpec.describe Datadog::Profiling::TraceIdentifiers::Helper do
     context 'when the api provider returns a trace resource container together with the trace identifiers' do
       before do
         allow(api1)
-          .to re
+          .to receive(:trace_identifiers_for)
+          .and_return([:api1_root_span_id, :api1_span_id, :api1_trace_resource_container])
+      end
+
+      it 'returns the trace resource container together with the trace identifiers' do
+        expect(trace_identifiers_for).to eq [:api1_root_span_id, :api1_span_id, :api1_trace_resource_container]
+      end
+
+      context 'and endpoint_collection_enabled is set to false' do
+        let(:endpoint_collection_enabled) { false }
+
+        it 'returns the trace identifiers but removes the trace resource container' do
+          expect(trace_identifiers_for).to eq [:api1_root_span_id, :api1_span_id]
+        end
+      end
+    end
+  end
+end
