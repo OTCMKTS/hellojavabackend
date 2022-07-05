@@ -223,4 +223,100 @@ RSpec.describe Datadog::Profiling do
   describe '::try_loading_native_library' do
     subject(:try_loading_native_library) { described_class.send(:try_loading_native_library) }
 
-    let(:native_extens
+    let(:native_extension_require_relative) { 'profiling/load_native_extension' }
+
+    context 'when the profiling native library loads successfully' do
+      before do
+        expect(described_class)
+          .to receive(:require_relative)
+          .with(native_extension_require_relative)
+        stub_const('Datadog::Profiling::NativeExtension', double(native_working?: true))
+      end
+
+      it { is_expected.to eq [true, nil] }
+    end
+
+    context 'when the profiling native library fails to load with a LoadError' do
+      before do
+        expect(described_class).to receive(:require_relative).with(native_extension_require_relative).and_raise(loaderror)
+      end
+
+      let(:loaderror) { LoadError.new('Simulated require failure') }
+
+      it { is_expected.to eq [false, loaderror] }
+    end
+
+    context 'when the profiling native library fails to load with a different error' do
+      before do
+        expect(described_class).to receive(:require_relative).with(native_extension_require_relative).and_raise(error)
+      end
+
+      let(:error) { StandardError.new('Simulated require failure') }
+
+      it { is_expected.to eq [false, error] }
+    end
+
+    context 'when the profiling native library loads but does not install code correctly' do
+      before do
+        expect(described_class)
+          .to receive(:require_relative)
+          .with(native_extension_require_relative)
+        stub_const('Datadog::Profiling::NativeExtension', double(native_working?: false))
+      end
+
+      it { is_expected.to eq [false, nil] }
+    end
+  end
+
+  describe '::try_reading_skipped_reason_file' do
+    subject(:try_reading_skipped_reason_file) { described_class.send(:try_reading_skipped_reason_file, file_api) }
+
+    let(:file_api) { class_double(File, exist?: exist?, read: read) }
+    let(:exist?) { true }
+    let(:read) { '' }
+
+    it 'tries to read the skipped_reason.txt file in the native extension folder' do
+      expected_path = File.expand_path('../../ext/ddtrace_profiling_native_extension/skipped_reason.txt', __dir__)
+
+      expect(file_api).to receive(:exist?) do |path|
+        expect(File.expand_path(path)).to eq expected_path
+      end.and_return(true)
+
+      expect(file_api).to receive(:read) do |path|
+        expect(File.expand_path(path)).to eq expected_path
+      end.and_return('')
+
+      try_reading_skipped_reason_file
+    end
+
+    context 'when file does not exist' do
+      let(:exist?) { false }
+
+      it { is_expected.to be nil }
+    end
+
+    context 'when file fails to open' do
+      let(:exist?) { true }
+
+      before do
+        expect(file_api).to receive(:read) { File.open('this-will-fail') }
+      end
+
+      it { is_expected.to be nil }
+    end
+
+    context 'when file is empty' do
+      let(:read) { " \t\n" }
+
+      it { is_expected.to be nil }
+    end
+
+    context 'when file exists and has content' do
+      let(:read) { 'skipped reason content' }
+
+      it 'returns the content' do
+        is_expected.to eq 'skipped reason content'
+      end
+    end
+  end
+end
