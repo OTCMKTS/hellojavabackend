@@ -195,4 +195,112 @@ RSpec.shared_context 'benchmark' do
     # CPU profiling report
     context 'RubyProf report' do
       before do
-        if PlatformHelpers.jruby? || Gem::Version.new(RUBY_V
+        if PlatformHelpers.jruby? || Gem::Version.new(RUBY_VERSION) < Gem::Version.new('2.4.0')
+          skip("'ruby-prof' not supported")
+        end
+      end
+
+      before do
+        require 'ruby-prof'
+        RubyProf.measure_mode = RubyProf::PROCESS_TIME
+      end
+
+      it do
+        warm_up
+
+        steps.each do |step|
+          result = RubyProf.profile do
+            (memory_iterations * 5).times { subject(step) }
+          end
+
+          report_results(result, step)
+        end
+      end
+
+      def report_results(result, step)
+        puts "Report for step: #{step}"
+
+        directory = result_directory!(step)
+
+        printer = RubyProf::CallTreePrinter.new(result)
+        printer.print(path: directory)
+
+        warn("Results written in Callgrind format to #{directory}")
+        warn('You can use KCachegrind or QCachegrind to read these results.')
+        warn('On MacOS:')
+        warn('$ brew install qcachegrind')
+        warn("$ qcachegrind '#{Dir["#{directory}/*"].min}'")
+      end
+    end
+  end
+end
+
+require 'socket'
+
+# An "agent" that always responds with a proper OK response, while
+# keeping minimum overhead.
+#
+# The goal is to reduce external performance noise from running a real
+# agent process in the system.
+#
+# It finds a locally available port to listen on, and updates the value of
+# {Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_PORT} accordingly.
+RSpec.shared_context 'minimal agent' do
+  let(:agent_server) { TCPServer.new '127.0.0.1', agent_port }
+  let(:agent_port) { ENV[Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_PORT].to_i }
+
+  def server_runner
+    previous_conn = nil
+    loop do
+      conn = agent_server.accept
+
+      # Sample agent response, collected from a real agent exchange.
+      conn.print "HTTP/1.1 200\r\n" \
+        "Content-Length: 40\r\n" \
+        "Content-Type: application/json\r\n" \
+        "Date: Thu, 03 Sep 2020 20:05:54 GMT\r\n" \
+        "\r\n" \
+        "{\"rate_by_service\":{\"service:,env:\":1}}\n".freeze
+      conn.flush
+
+      # Read HTTP request to allow other side to have enough
+      # buffer write room. If we don't, the client won't be
+      # able to send the full request until the buffer is cleared.
+      conn.read(1 << 31 - 1)
+
+      # Closing the connection immediately can sometimes
+      # be too fast, cause to other side to not be able
+      # to read the response in time.
+      # We instead delay closing the connection until the next
+      # connection request comes in.
+      previous_conn.close if previous_conn
+      previous_conn = conn
+    end
+  end
+
+  before do
+    # Initializes server in a fork, to allow for true concurrency.
+    # In JRuby, threads are not supported, but true thread concurrency is.
+    @agent_runner = if Process.respond_to?(:fork)
+                      fork { server_runner }
+                    else
+                      Thread.new { server_runner }
+                    end
+  end
+
+  after do
+    if Process.respond_to?(:fork)
+      Process.kill('TERM', @agent_runner) rescue nil
+      Process.wait(@agent_runner)
+    else
+      @agent_runner.kill
+    end
+  end
+
+  around do |example|
+    # Set the agent port used by the default HTTP transport
+    ClimateControl.modify(Datadog::Tracing::Configuration::Ext::Transport::ENV_DEFAULT_PORT => available_port.to_s) do
+      example.run
+    end
+  end
+end
