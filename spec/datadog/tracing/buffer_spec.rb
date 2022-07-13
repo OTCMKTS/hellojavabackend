@@ -224,4 +224,173 @@ RSpec.shared_examples 'trace buffer' do
 
         # A trace will be dropped at random, except the trace
         # that triggered the overflow.
-        dropped_traces = items.reject { |t| pop.i
+        dropped_traces = items.reject { |t| pop.include?(t) }
+
+        expected_traces = items - dropped_traces
+        net_spans = expected_traces.inject(0) { |sum, t| sum + t.length }
+
+        # Calling #pop produces metrics:
+        # Accept events for every #push, and one drop event for overflow
+        expect(health_metrics).to have_received(:queue_accepted)
+          .with(items.length)
+        expect(health_metrics).to have_received(:queue_accepted_lengths)
+          .with(accepted_spans)
+
+        expect(health_metrics).to have_received(:queue_dropped)
+          .with(dropped_traces.length)
+
+        # Metrics for queue gauges.
+        expect(health_metrics).to have_received(:queue_max_length)
+          .with(max_size)
+        expect(health_metrics).to have_received(:queue_spans)
+          .with(net_spans)
+        expect(health_metrics).to have_received(:queue_length)
+          .with(max_size)
+      end
+    end
+  end
+
+  describe '#concat' do
+    let(:output) { buffer.pop }
+
+    context 'given no limit' do
+      let(:items) { get_test_traces(4) }
+      let(:max_size) { 0 }
+
+      it 'retains all items' do
+        buffer.concat(items)
+        expect(output.length).to eq(4)
+      end
+    end
+
+    context 'given a max size' do
+      let(:items) { get_test_traces(max_size + 1) }
+      let(:max_size) { 3 }
+
+      it 'does not exceed it' do
+        buffer.concat(items)
+
+        expect(output.length).to eq(max_size)
+        expect(output).to include(items.last)
+      end
+    end
+  end
+
+  describe '#pop' do
+    subject(:pop) { buffer.pop }
+
+    let(:traces) { get_test_traces(2) }
+
+    before { traces.each { |t| buffer.push(t) } }
+
+    it 'records health metrics' do
+      pop
+
+      expected_spans = traces.inject(0) { |sum, t| sum + t.length }
+
+      # Calling #pop produces metrics:
+      # Metrics for accept events and one drop event
+      expect(health_metrics).to have_received(:queue_accepted)
+        .with(traces.length)
+      expect(health_metrics).to have_received(:queue_accepted_lengths)
+        .with(expected_spans)
+
+      expect(health_metrics).to have_received(:queue_dropped)
+        .with(0)
+
+      # Metrics for queue gauges.
+      expect(health_metrics).to have_received(:queue_max_length)
+        .with(max_size)
+      expect(health_metrics).to have_received(:queue_spans)
+        .with(expected_spans)
+      expect(health_metrics).to have_received(:queue_length)
+        .with(traces.length)
+    end
+  end
+end
+
+# :nocov:
+RSpec.shared_examples 'performance' do
+  subject(:buffer) { described_class.new(max_size) }
+
+  let(:max_size) { 0 }
+
+  require 'benchmark'
+  let(:n) { 10_000 }
+  let(:test_item_count) { 20 }
+
+  def get_test_items(n = 1)
+    Array.new(n) { double('item') }
+  end
+
+  before { skip('Performance test does not run in CI.') }
+
+  context 'no max_size' do
+    it do
+      Benchmark.bmbm do |x|
+        x.report('No max #push') do
+          n.times do
+            buffer = described_class.new(max_size)
+            items = get_test_items(test_item_count)
+
+            items.each { |item| buffer.push(item) }
+          end
+        end
+
+        x.report('No max #concat') do
+          n.times do
+            buffer = described_class.new(max_size)
+            items = get_test_items(test_item_count)
+
+            buffer.concat(items)
+          end
+        end
+      end
+    end
+  end
+
+  context 'max size' do
+    let(:max_size) { 20 }
+
+    context 'no overflow' do
+      let(:test_item_count) { max_size }
+
+      it do
+        Benchmark.bmbm do |x|
+          x.report('Max no overflow #push') do
+            n.times do
+              buffer = described_class.new(max_size)
+              items = get_test_items(test_item_count)
+
+              items.each { |item| buffer.push(item) }
+            end
+          end
+
+          x.report('Max no overflow #concat') do
+            n.times do
+              buffer = described_class.new(max_size)
+              items = get_test_items(test_item_count)
+
+              buffer.concat(items)
+            end
+          end
+        end
+      end
+    end
+
+    context 'partial overflow' do
+      let(:test_item_count) { max_size + super() }
+
+      it do
+        Benchmark.bmbm do |x|
+          x.report('Max partial overflow #push') do
+            n.times do
+              buffer = described_class.new(max_size)
+              items = get_test_items(test_item_count)
+
+              items.each { |item| buffer.push(item) }
+            end
+          end
+
+          x.report('Max partial overflow #concat') do
+            n.ti
