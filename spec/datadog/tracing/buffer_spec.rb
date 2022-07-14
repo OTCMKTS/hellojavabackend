@@ -393,4 +393,82 @@ RSpec.shared_examples 'performance' do
           end
 
           x.report('Max partial overflow #concat') do
-            n.ti
+            n.times do
+              buffer = described_class.new(max_size)
+              items = get_test_items(test_item_count)
+
+              buffer.concat(items)
+            end
+          end
+        end
+      end
+    end
+
+    context 'total overflow' do
+      it do
+        Benchmark.bmbm do |x|
+          x.report('Max total overflow #push') do
+            n.times do
+              buffer = described_class.new(max_size)
+              buffer.instance_variable_set(:@items, get_test_items(max_size))
+              items = get_test_items(test_item_count)
+
+              items.each { |item| buffer.push(item) }
+            end
+          end
+
+          x.report('Max total overflow #concat') do
+            n.times do
+              buffer = described_class.new(max_size)
+              buffer.instance_variable_set(:@items, get_test_items(max_size))
+              items = get_test_items(test_item_count)
+
+              buffer.concat(items)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+# :nocov:
+
+RSpec.describe Datadog::Tracing::ThreadSafeTraceBuffer do
+  let(:items) { get_test_traces(items_count) }
+
+  before do
+    logger = double(Datadog::Core::Logger)
+    allow(logger).to receive(:debug?).and_return true
+    allow(logger).to receive(:debug)
+    allow(logger).to receive(:info)
+    allow(logger).to receive(:warn)
+    allow(logger).to receive(:error)
+
+    allow(Datadog).to receive(:logger).and_return(logger)
+  end
+
+  it_behaves_like 'trace buffer'
+  it_behaves_like 'thread-safe buffer'
+  it_behaves_like 'performance'
+end
+
+RSpec.describe Datadog::Tracing::CRubyTraceBuffer do
+  before do
+    skip unless PlatformHelpers.mri?
+
+    logger = double(Datadog::Core::Logger)
+    allow(logger).to receive(:debug?).and_return true
+    allow(logger).to receive(:debug)
+    allow(logger).to receive(:info)
+    allow(logger).to receive(:warn)
+    allow(logger).to receive(:error)
+
+    allow(Datadog).to receive(:logger).and_return(logger)
+  end
+
+  let(:items) { get_test_traces(items_count) }
+
+  it_behaves_like 'trace buffer'
+  it_behaves_like 'thread-safe buffer'
+  it_behaves_like 'performance'
+end
