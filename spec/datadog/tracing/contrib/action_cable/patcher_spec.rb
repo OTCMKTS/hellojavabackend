@@ -158,4 +158,97 @@ RSpec.describe 'ActionCable patcher' do
         perform
 
         expect(span.service).to eq(tracer.default_service)
-        expect(span.name).to eq('a
+        expect(span.name).to eq('action_cable.action')
+        expect(span.span_type).to eq('web')
+        expect(span.resource).to eq('ChatChannel#foo')
+        expect(span.get_tag('action_cable.channel_class')).to eq('ChatChannel')
+        expect(span.get_tag('action_cable.action')).to eq('foo')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('action_cable')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('action')
+        expect(span).to_not have_error
+      end
+
+      it_behaves_like 'analytics for integration' do
+        before do
+          ActiveSupport::Notifications.instrument(
+            Datadog::Tracing::Contrib::ActionCable::Events::PerformAction::EVENT_NAME
+          )
+        end
+
+        let(:analytics_enabled_var) { Datadog::Tracing::Contrib::ActionCable::Ext::ENV_ANALYTICS_ENABLED }
+        let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::ActionCable::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+      end
+
+      it_behaves_like 'measured span for integration', true do
+        before do
+          ActiveSupport::Notifications.instrument(
+            Datadog::Tracing::Contrib::ActionCable::Events::PerformAction::EVENT_NAME
+          )
+        end
+      end
+
+      context 'with a leaking context' do
+        let!(:leaky_span) { tracer.trace('unfinished_span') }
+
+        it 'traces transmit event' do
+          perform
+          expect(span.name).to eq('action_cable.action')
+        end
+      end
+    end
+
+    context 'on transmit' do
+      subject(:perform) { channel_instance.perform_action(data) }
+
+      let(:data) { { 'action' => 'foo', 'extra' => 'data' } }
+      let(:channel_class) do
+        stub_const(
+          'ChatChannel',
+          Class.new(ActionCable::Channel::Base) do
+            def foo(_data)
+              transmit({ mock: 'data' }, via: 'streamed from chat_channel')
+            end
+          end
+        )
+      end
+
+      let(:span) { spans.last } # Skip 'perform_action' span
+
+      it 'traces transmit event' do
+        perform
+
+        expect(spans).to have(2).items
+        expect(span.service).to eq(tracer.default_service)
+        expect(span.name).to eq('action_cable.transmit')
+        expect(span.span_type).to eq('web')
+        expect(span.resource).to eq('ChatChannel')
+        expect(span.get_tag('action_cable.channel_class')).to eq('ChatChannel')
+        expect(span.get_tag('action_cable.transmit.via')).to eq('streamed from chat_channel')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('action_cable')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('transmit')
+        expect(span).to_not have_error
+      end
+
+      it_behaves_like 'analytics for integration' do
+        before do
+          ActiveSupport::Notifications.instrument(
+            Datadog::Tracing::Contrib::ActionCable::Events::Transmit::EVENT_NAME
+          )
+        end
+
+        let(:analytics_enabled_var) { Datadog::Tracing::Contrib::ActionCable::Ext::ENV_ANALYTICS_ENABLED }
+        let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::ActionCable::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+      end
+
+      it_behaves_like 'measured span for integration', false do
+        before do
+          ActiveSupport::Notifications.instrument(
+            Datadog::Tracing::Contrib::ActionCable::Events::Transmit::EVENT_NAME
+          )
+        end
+      end
+    end
+  end
+end
