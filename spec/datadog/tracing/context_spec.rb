@@ -52,4 +52,146 @@ RSpec.describe Datadog::Tracing::Context do
       let(:trace) { instance_double(Datadog::Tracing::TraceOperation, finished?: finished?) }
 
       context 'that is finished' do
-   
+        let(:finished?) { true }
+
+        it { expect { |b| context.activate!(trace, &b) }.to yield_control }
+        it { expect(context.activate!(trace) { :return_value }).to be :return_value }
+
+        it do
+          expect { activate! }
+            .to_not change { context.active_trace }
+            .from(nil)
+        end
+
+        context 'and a block' do
+          it do
+            expect(context.active_trace).to be nil
+
+            # Activate finished trace
+            context.activate!(trace) do
+              expect(context.active_trace).to be nil
+            end
+
+            expect(context.active_trace).to be nil
+          end
+
+          context 'outside which another trace is active' do
+            let(:original_trace) { instance_double(Datadog::Tracing::TraceOperation, finished?: false) }
+
+            it do
+              context.activate!(original_trace)
+              expect(context.active_trace).to be original_trace
+
+              # Activate unfinished trace
+              context.activate!(trace) do
+                expect(context.active_trace).to be nil
+              end
+
+              expect(context.active_trace).to be original_trace
+            end
+
+            context 'which completes in the block' do
+              it do
+                context.activate!(original_trace)
+                expect(context.active_trace).to be original_trace
+
+                # Activate unfinished trace
+                context.activate!(trace) do
+                  expect(context.active_trace).to be nil
+                  allow(original_trace).to receive(:finished?).and_return(true)
+                end
+
+                expect(context.active_trace).to be nil
+              end
+            end
+          end
+
+          context 'that raises an Exception' do
+            let(:error) { error_class.new }
+            # rubocop:disable Lint/InheritException
+            let(:error_class) { stub_const('TestError', Class.new(Exception)) }
+            # rubocop:enable Lint/InheritException
+
+            it do
+              expect(context.active_trace).to be nil
+
+              expect do
+                context.activate!(trace) do
+                  expect(context.active_trace).to be nil
+                  raise error
+                end
+              end.to raise_error(error)
+
+              expect(context.active_trace).to be nil
+            end
+          end
+        end
+      end
+
+      context 'that isn\'t finished' do
+        let(:finished?) { false }
+
+        it { expect { |b| context.activate!(trace, &b) }.to yield_control }
+        it { expect(context.activate!(trace) { :return_value }).to be :return_value }
+
+        it do
+          expect { activate! }
+            .to change { context.active_trace }
+            .from(nil)
+            .to(trace)
+        end
+
+        context 'and a block' do
+          it do
+            expect(context.active_trace).to be nil
+
+            # Activate unfinished trace
+            context.activate!(trace) do
+              expect(context.active_trace).to be trace
+            end
+
+            expect(context.active_trace).to be nil
+          end
+
+          context 'outside which another trace is active' do
+            let(:original_trace) { instance_double(Datadog::Tracing::TraceOperation, finished?: false) }
+
+            it do
+              context.activate!(original_trace)
+              expect(context.active_trace).to be original_trace
+
+              # Activate unfinished trace
+              context.activate!(trace) do
+                expect(context.active_trace).to be trace
+              end
+
+              expect(context.active_trace).to be original_trace
+            end
+
+            context 'which completes in the block' do
+              it do
+                context.activate!(original_trace)
+                expect(context.active_trace).to be original_trace
+
+                # Activate unfinished trace
+                context.activate!(trace) do
+                  expect(context.active_trace).to be trace
+                  allow(original_trace).to receive(:finished?).and_return(true)
+                end
+
+                expect(context.active_trace).to be nil
+              end
+            end
+          end
+
+          context 'that raises an Exception' do
+            let(:error) { error_class.new }
+            # rubocop:disable Lint/InheritException
+            let(:error_class) { stub_const('TestError', Class.new(Exception)) }
+            # rubocop:enable Lint/InheritException
+
+            it do
+              expect(context.active_trace).to be nil
+
+              expect do
+                context.activate!(tra
