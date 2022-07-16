@@ -194,4 +194,43 @@ RSpec.describe Datadog::Tracing::Context do
               expect(context.active_trace).to be nil
 
               expect do
-                context.activate!(tra
+                context.activate!(trace) do
+                  expect(context.active_trace).to be trace
+                  raise error
+                end
+              end.to raise_error(error)
+
+              expect(context.active_trace).to be nil
+            end
+          end
+        end
+      end
+    end
+  end
+
+  describe '#fork_clone' do
+    subject(:fork_clone) { context.fork_clone }
+
+    context 'when a trace is active' do
+      let(:trace) { instance_double(Datadog::Tracing::TraceOperation, finished?: false) }
+      let(:cloned_trace) { instance_double(Datadog::Tracing::TraceOperation, finished?: false) }
+
+      before do
+        allow(trace).to receive(:fork_clone).and_return(cloned_trace)
+        context.activate!(trace)
+      end
+
+      it do
+        is_expected.to be_a_kind_of(described_class)
+        expect(fork_clone.active_trace).to be(cloned_trace)
+      end
+    end
+
+    context 'when a trace is not active' do
+      it do
+        is_expected.to be_a_kind_of(described_class)
+        expect(fork_clone.active_trace).to be nil
+      end
+    end
+  end
+end
