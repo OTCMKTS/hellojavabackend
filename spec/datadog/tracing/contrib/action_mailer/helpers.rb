@@ -27,4 +27,6 @@ RSpec.shared_context 'ActionMailer helpers' do
           )
         end
       end
-   
+    )
+  end
+end
