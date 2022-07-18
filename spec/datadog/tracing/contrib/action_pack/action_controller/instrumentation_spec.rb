@@ -60,4 +60,20 @@ RSpec.describe Datadog::Tracing::Contrib::ActionPack::ActionController::Instrume
           super().merge(
             exception: [error.class.name, error.message],
             exception_object: error
-        
+          )
+        end
+
+        before do
+          expect(Datadog.logger).to_not receive(:error)
+          finish_processing
+        end
+
+        describe 'the Datadog span' do
+          it do
+            expect(span).to have_error
+          end
+        end
+      end
+    end
+  end
+end
