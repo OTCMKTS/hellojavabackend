@@ -22,4 +22,149 @@ RSpec.shared_examples_for 'analytics for integration' do |options = { ignore_glo
         end
       end
 
-      # Most 
+      # Most integrations ignore the global flag by default,
+      # because they aren't considered "key" integrations.
+      # These integrations will not expect it to be set, despite the global flag.
+      if options[:ignore_global_flag]
+        it 'is not included in the tags' do
+          expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to be nil
+        end
+      else
+        it 'is included in the tags' do
+          expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to eq(1.0)
+        end
+      end
+    end
+
+    context 'and the global flag is disabled' do
+      around do |example|
+        ClimateControl.modify(Datadog::Tracing::Configuration::Ext::Analytics::ENV_TRACE_ANALYTICS_ENABLED => 'false') do
+          example.run
+        end
+      end
+
+      it 'is not included in the tags' do
+        expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to be nil
+      end
+    end
+  end
+
+  context 'when configured by environment variable' do
+    context 'and explicitly enabled' do
+      around do |example|
+        ClimateControl.modify(analytics_enabled_var => 'true') do
+          example.run
+        end
+      end
+
+      shared_examples_for 'sample rate value' do
+        context 'isn\'t set' do
+          it { expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to eq(1.0) }
+        end
+
+        context 'is set' do
+          let(:analytics_sample_rate) { 0.5 }
+
+          around do |example|
+            ClimateControl.modify(analytics_sample_rate_var => analytics_sample_rate.to_s) do
+              example.run
+            end
+          end
+
+          it do
+            expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE))
+              .to eq(analytics_sample_rate)
+          end
+        end
+      end
+
+      context 'and global flag' do
+        context 'is not set' do
+          it_behaves_like 'sample rate value'
+        end
+
+        context 'is explicitly enabled' do
+          around do |example|
+            ClimateControl.modify(
+              Datadog::Tracing::Configuration::Ext::Analytics::ENV_TRACE_ANALYTICS_ENABLED => 'true'
+            ) do
+              example.run
+            end
+          end
+
+          it_behaves_like 'sample rate value'
+        end
+
+        context 'is explicitly disabled' do
+          around do |example|
+            ClimateControl.modify(
+              Datadog::Tracing::Configuration::Ext::Analytics::ENV_TRACE_ANALYTICS_ENABLED => 'false'
+            ) do
+              example.run
+            end
+          end
+
+          it_behaves_like 'sample rate value'
+        end
+      end
+    end
+
+    context 'and explicitly disabled' do
+      around do |example|
+        ClimateControl.modify(analytics_enabled_var => 'false') do
+          example.run
+        end
+      end
+
+      shared_examples_for 'sample rate value' do
+        context 'isn\'t set' do
+          it { expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to be nil }
+        end
+
+        context 'is set' do
+          let(:analytics_sample_rate) { 0.5 }
+
+          around do |example|
+            ClimateControl.modify(analytics_sample_rate_var => analytics_sample_rate.to_s) do
+              example.run
+            end
+          end
+
+          it { expect(span.get_metric(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE)).to be nil }
+        end
+      end
+
+      context 'and global flag' do
+        context 'is not set' do
+          it_behaves_like 'sample rate value'
+        end
+
+        context 'is explicitly enabled' do
+          around do |example|
+            ClimateControl.modify(
+              Datadog::Tracing::Configuration::Ext::Analytics::ENV_TRACE_ANALYTICS_ENABLED => 'true'
+            ) do
+              example.run
+            end
+          end
+
+          it_behaves_like 'sample rate value'
+        end
+
+        context 'is explicitly disabled' do
+          around do |example|
+            ClimateControl.modify(
+              Datadog::Tracing::Configuration::Ext::Analytics::ENV_TRACE_ANALYTICS_ENABLED => 'false'
+            ) do
+              example.run
+            end
+          end
+
+          it_behaves_like 'sample rate value'
+        end
+      end
+    end
+  end
+
+  shared_context 'analytics setting' do |analytics_enabled|
+    let(:analytics_enabled) { defined?(super) ? super() : analytics_enabl
