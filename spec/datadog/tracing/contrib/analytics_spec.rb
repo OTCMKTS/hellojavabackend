@@ -52,4 +52,41 @@ RSpec.describe Datadog::Tracing::Contrib::Analytics do
       it 'sets the tag' do
         expect(span).to receive(:set_metric)
           .with(
-            Datadog::Tracing::Metadata::Ext:
+            Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE,
+            sample_rate
+          )
+
+        set_sample_rate
+      end
+    end
+  end
+
+  describe '::set_measured' do
+    subject(:set_measured) { described_class.set_measured(span) }
+
+    let(:span) { instance_double(Datadog::Tracing::Span) }
+
+    before do
+      allow(Datadog::Tracing::Analytics).to receive(:set_measured)
+      set_measured
+    end
+
+    context 'when only a span is given' do
+      it 'sets measured as true' do
+        expect(Datadog::Tracing::Analytics).to have_received(:set_measured)
+          .with(span, true)
+      end
+    end
+
+    context 'when a span and value is given' do
+      subject(:set_measured) { described_class.set_measured(span, value) }
+
+      let(:value) { double('value') }
+
+      it 'sets measured as true' do
+        expect(Datadog::Tracing::Analytics).to have_received(:set_measured)
+          .with(span, value)
+      end
+    end
+  end
+end
