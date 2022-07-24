@@ -41,4 +41,43 @@ RSpec.describe Datadog::Tracing::Contrib::Configuration::Resolver do
       let(:first_matcher) { 'value' }
       let(:second_matcher) { 'value' }
 
-      it 'retu
+      it 'returns the latest added one' do
+        is_expected.to eq(:second)
+      end
+    end
+  end
+
+  describe '#add' do
+    subject(:add) { resolver.add(matcher, config) }
+
+    let(:matcher) { double('matcher') }
+
+    it { is_expected.to be config }
+
+    it 'stores in the configuration field' do
+      add
+      expect(resolver.configurations).to eq(matcher => config)
+    end
+  end
+
+  describe '#get' do
+    subject(:get) { resolver.get(matcher) }
+
+    let(:matcher) { double('matcher') }
+
+    before { resolver.add(matcher, config) }
+
+    it { is_expected.to be config }
+
+    context 'with a custom #parse_matcher' do
+      let(:parsed_matcher) { double('parsed_matcher') }
+      let(:resolver) do
+        super().tap do |r|
+          expect(r).to receive(:parse_matcher).with(matcher).and_return(parsed_matcher).twice
+        end
+      end
+
+      it { is_expected.to be config }
+    end
+  end
+end
