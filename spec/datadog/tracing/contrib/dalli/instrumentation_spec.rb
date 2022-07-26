@@ -90,4 +90,18 @@ RSpec.describe 'Dalli instrumentation' do
         expect(span.span_type).to eq('memcached')
         expect(span.resource).to eq('SET')
         expect(span.get_tag('memcached.command')).to eq('set abc 123 0 0')
-        expect(span.get_tag('out.host')).to eq(t
+        expect(span.get_tag('out.host')).to eq(test_host)
+        expect(span.get_tag('out.port')).to eq(test_port.to_f)
+
+        expect(span.get_tag('db.system')).to eq('memcached')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_KIND)).to eq('client')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('dalli')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('command')
+      end
+
+      it_behaves_like 'a peer service span' do
+        let(:peer_hostname) { test_host }
+      end
+    end
+  end
+end
