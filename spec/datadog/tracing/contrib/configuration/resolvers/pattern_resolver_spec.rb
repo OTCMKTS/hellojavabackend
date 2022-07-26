@@ -131,4 +131,42 @@ RSpec.describe Datadog::Tracing::Contrib::Configuration::Resolvers::PatternResol
     context 'when given a Regexp' do
       let(:matcher) { /value/ }
 
-      it 'allows any
+      it 'allows any string matching the matcher to resolve' do
+        expect { add }.to change { resolver.resolve('my-value') }
+          .from(nil)
+          .to(config)
+      end
+    end
+
+    context 'when given a Proc' do
+      let(:matcher) { proc { |n| n == 'my-value' } }
+
+      it 'allows any string matching the matcher to resolve' do
+        expect { add }.to change { resolver.resolve('my-value') }
+          .from(nil)
+          .to(config)
+      end
+    end
+
+    context 'when given a string' do
+      let(:matcher) { 'my-value' }
+
+      it 'allows identical strings to resolve' do
+        expect { add }.to change { resolver.resolve(matcher) }
+          .from(nil)
+          .to(config)
+      end
+    end
+
+    context 'when given some object that responds to #to_s' do
+      let(:matcher) { URI('http://localhost') }
+
+      it 'allows its #to_s value to match identical strings when resolved' do
+        expect(matcher).to respond_to(:to_s)
+        expect { add }.to change { resolver.resolve('http://localhost') }
+          .from(nil)
+          .to(config)
+      end
+    end
+  end
+end
