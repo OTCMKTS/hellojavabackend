@@ -76,4 +76,21 @@ RSpec.describe 'Ethon integration tests' do
       Typhoeus::Response.new(easy.mirror.options)
     end
 
-    it_behaves_like 'inst
+    it_behaves_like 'instrumented request' do
+      let(:method) { 'N/A' }
+    end
+  end
+
+  context 'with single Multi request' do
+    subject(:request) do
+      multi = Ethon::Multi.new
+      easy = EthonSupport.ethon_easy_new
+      easy.http_request(url, 'GET', params: query, timeout_ms: timeout * 1000)
+      multi.add(easy)
+      multi.perform
+      Typhoeus::Response.new(easy.mirror.options)
+    end
+
+    it_behaves_like 'instrumented request'
+  end
+end
