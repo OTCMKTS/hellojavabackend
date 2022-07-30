@@ -250,4 +250,159 @@ RSpec.describe 'Faraday middleware' do
     it_behaves_like 'environment service name', 'DD_TRACE_FARADAY_SERVICE_NAME'
   end
 
-  conte
+  context 'when there is custom error handling' do
+    subject!(:response) { client.get('not_found') }
+
+    let(:middleware_options) { { error_handler: custom_handler } }
+    let(:custom_handler) { ->(env) { (400...600).cover?(env[:status]) } }
+
+    it { expect(span).to have_error }
+
+    it_behaves_like 'environment service name', 'DD_TRACE_FARADAY_SERVICE_NAME'
+  end
+
+  context 'when split by domain' do
+    subject(:response) { client.get('/success') }
+
+    let(:configuration_options) { super().merge(split_by_domain: true) }
+
+    it do
+      response
+      expect(span.name).to eq(Datadog::Tracing::Contrib::Faraday::Ext::SPAN_REQUEST)
+      expect(span.service).to eq('example.com')
+      expect(span.resource).to eq('GET')
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:peer_hostname) { 'example.com' }
+    end
+
+    context 'and the host matches a specific configuration' do
+      before do
+        Datadog.configure do |c|
+          c.tracing.instrument :faraday, describes: /example\.com/ do |faraday|
+            faraday.service_name = 'bar'
+            faraday.split_by_domain = false
+          end
+
+          c.tracing.instrument :faraday, describes: /badexample\.com/ do |faraday|
+            faraday.service_name = 'bar_bad'
+            faraday.split_by_domain = false
+          end
+        end
+      end
+
+      it 'uses the configured service name over the domain name and the correct describes block' do
+        response
+        expect(span.service).to eq('bar')
+      end
+    end
+  end
+
+  context 'default request headers' do
+    subject(:response) { client.get('/success') }
+
+    let(:headers) { response.env.request_headers }
+
+    it do
+      expect(headers).to include(
+        'x-datadog-trace-id' => span.trace_id.to_s,
+        'x-datadog-parent-id' => span.span_id.to_s
+      )
+    end
+
+    context 'but the tracer is disabled' do
+      before { tracer.enabled = false }
+
+      it do
+        expect(headers).to_not include('x-datadog-trace-id')
+        expect(headers).to_not include('x-datadog-parent-id')
+        expect(spans.length).to eq(0)
+      end
+    end
+  end
+
+  context 'when distributed tracing is disabled' do
+    subject(:response) { client.get('/success') }
+
+    let(:middleware_options) { { distributed_tracing: false } }
+    let(:headers) { response.env.request_headers }
+
+    it do
+      expect(headers).to_not include('x-datadog-trace-id')
+      expect(headers).to_not include('x-datadog-parent-id')
+    end
+  end
+
+  context 'global service name' do
+    let(:service_name) { 'faraday-global' }
+
+    before do
+      @old_service_name = Datadog.configuration.tracing[:faraday][:service_name]
+      Datadog.configure { |c| c.tracing.instrument :faraday, service_name: service_name }
+    end
+
+    after { Datadog.configure { |c| c.tracing.instrument :faraday, service_name: @old_service_name } }
+
+    subject { client.get('/success') }
+
+    it do
+      subject
+      expect(span.service).to eq(service_name)
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:peer_hostname) { 'example.com' }
+    end
+  end
+
+  context 'service name per request' do
+    subject!(:response) { client.get('/success') }
+
+    let(:middleware_options) { { service_name: service_name } }
+    let(:service_name) { 'adhoc-request' }
+
+    it do
+      expect(span.service).to eq(service_name)
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:peer_hostname) { 'example.com' }
+    end
+  end
+
+  context 'configuration override' do
+    subject(:response) { client.get('/success') }
+
+    context 'with global configuration' do
+      let(:configuration_options) { super().merge(service_name: 'global') }
+
+      it 'uses the global value' do
+        subject
+        expect(span.service).to eq('global')
+      end
+
+      context 'and per-host configuration' do
+        before do
+          Datadog.configure do |c|
+            c.tracing.instrument :faraday, describes: /example\.com/, service_name: 'host'
+          end
+        end
+
+        it 'uses per-host override' do
+          subject
+          expect(span.service).to eq('host')
+        end
+
+        context 'with middleware instance configuration' do
+          let(:middleware_options) { super().merge(service_name: 'instance') }
+
+          it 'uses middleware instance override' do
+            subject
+            expect(span.service).to eq('instance')
+          end
+        end
+      end
+    end
+  end
+end
