@@ -77,4 +77,113 @@ RSpec.describe 'tracing on the client connection' do
 
     it 'has component and operation tags' do
       expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('grpc')
-      expect(span.get_t
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('client')
+    end
+
+    it_behaves_like 'analytics for integration' do
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::GRPC::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::GRPC::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:peer_hostname) { host }
+    end
+
+    it_behaves_like 'measured span for integration', false
+    it_behaves_like 'environment service name', 'DD_TRACE_GRPC_SERVICE_NAME' do
+      let(:configuration_options) { {} }
+    end
+  end
+
+  shared_examples 'inject distributed tracing metadata' do
+    context 'when distributed tracing is disabled' do
+      let(:configuration_options) { { service_name: 'rspec', distributed_tracing: false } }
+
+      it 'doesn\'t inject the trace headers in gRPC metadata' do
+        expect(keywords[:metadata]).to eq(original_metadata)
+      end
+    end
+
+    context 'when distributed tracing is enabled' do
+      let(:configuration_options) { { service_name: 'rspec', distributed_tracing: true } }
+
+      it 'injects distribution data in gRPC metadata' do
+        expect(keywords[:metadata].keys).to include('x-datadog-trace-id', 'x-datadog-parent-id', 'x-datadog-tags')
+      end
+    end
+  end
+
+  describe '#request_response' do
+    let(:keywords) do
+      { request: instance_double(Object),
+        call: instance_double('GRPC::ActiveCall', peer: peer),
+        method: 'MyService.Endpoint',
+        metadata: original_metadata.clone }
+    end
+
+    let(:original_metadata) { { some: 'datum' } }
+
+    before do
+      subject.request_response(**keywords) {}
+    end
+
+    it_behaves_like 'span data contents'
+
+    it_behaves_like 'inject distributed tracing metadata'
+  end
+
+  describe '#client_streamer' do
+    let(:keywords) do
+      { call: instance_double('GRPC::ActiveCall', peer: peer),
+        method: 'MyService.Endpoint',
+        metadata: original_metadata.clone }
+    end
+    let(:original_metadata) { { some: 'datum' } }
+
+    before do
+      subject.client_streamer(**keywords) {}
+    end
+
+    it_behaves_like 'span data contents'
+
+    it_behaves_like 'inject distributed tracing metadata'
+  end
+
+  describe '#server_streamer' do
+    let(:keywords) do
+      { request: instance_double(Object),
+        call: instance_double('GRPC::ActiveCall', peer: peer),
+        method: 'MyService.Endpoint',
+        metadata: original_metadata.clone }
+    end
+
+    let(:original_metadata) { { some: 'datum' } }
+
+    before do
+      subject.server_streamer(**keywords) {}
+    end
+
+    it_behaves_like 'span data contents'
+
+    it_behaves_like 'inject distributed tracing metadata'
+  end
+
+  describe '#bidi_streamer' do
+    let(:keywords) do
+      { requests: instance_double(Array),
+        call: instance_double('GRPC::ActiveCall', peer: peer),
+        method: 'MyService.Endpoint',
+        metadata: original_metadata.clone }
+    end
+
+    let(:original_metadata) { { some: 'datum' } }
+
+    before do
+      subject.bidi_streamer(**keywords) {}
+    end
+
+    it_behaves_like 'span data contents'
+
+    it_behaves_like 'inject distributed tracing metadata'
+  end
+end
