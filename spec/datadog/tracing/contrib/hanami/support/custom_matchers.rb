@@ -63,4 +63,21 @@ RSpec::Matchers.define :be_hanami_action_span do
   end
 end
 
-RSpec::Matchers.define :be_han
+RSpec::Matchers.define :be_hanami_render_span do
+  match(notify_expectation_failures: true) do |span|
+    expect(span.name).to eq(Datadog::Tracing::Contrib::Hanami::Ext::SPAN_RENDER)
+    expect(span.parent_id).to eq(@parent.id)
+    expect(span.resource).to eq(@resource)
+
+    expect(span.span_type).to eq('web')
+    expect(span.service).to eq(tracer.default_service)
+    expect(span).to_not have_error
+    expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('hanami')
+    expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('render')
+  end
+
+  chain :with do |opts|
+    @resource = opts.fetch(:resource)
+    @parent = opts.fetch(:parent)
+  end
+end
