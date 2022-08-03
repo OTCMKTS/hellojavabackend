@@ -108,4 +108,13 @@ RSpec.describe Datadog::Tracing::Contrib::HTTP::CircuitBreaker do
         context 'a Datadog UDS transport' do
           let(:transport) do
             Datadog::Transport::HTTP.default do |t|
-              t.adapter :unix, '/tmp/ddagent/trace.so
+              t.adapter :unix, '/tmp/ddagent/trace.sock'
+            end
+          end
+
+          it { is_expected.to be true }
+        end
+      end
+    end
+  end
+end
