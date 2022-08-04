@@ -71,4 +71,19 @@ RSpec.shared_examples 'with error status code configuration' do
     end
 
     context 'with a status code at the end of the range' do
-      let(:s
+      let(:status_code) { 599 }
+
+      it 'marks the span as an error' do
+        expect(span).to have_error
+      end
+    end
+
+    context 'with a status code greater than the range' do
+      let(:status_code) { 600 }
+
+      it 'does not mark the span as an error' do
+        expect(span).to_not have_error
+      end
+    end
+  end
+end
