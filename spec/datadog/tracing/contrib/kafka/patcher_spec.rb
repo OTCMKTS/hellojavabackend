@@ -386,3 +386,323 @@ RSpec.describe 'Kafka patcher' do
 
     context 'that raises an error' do
       let(:error_class) { Class.new(StandardError) }
+
+      it 'is expected to send a span' do
+        # Emulate failure
+        begin
+          ActiveSupport::Notifications.instrument('join_group.consumer.kafka', payload) do
+            raise error_class
+          end
+        rescue error_class
+          nil
+        end
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.consumer.join_group')
+          expect(span.resource).to eq(group_id)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.group')).to eq(group_id)
+          expect(span).to have_error
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    it_behaves_like 'analytics for integration' do
+      before { ActiveSupport::Notifications.instrument('join_group.consumer.kafka', payload) }
+
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'measured span for integration', true do
+      before { ActiveSupport::Notifications.instrument('join_group.consumer.kafka', payload) }
+    end
+  end
+
+  describe 'consumer.leave_group' do
+    let(:group_id) { SecureRandom.uuid }
+    let(:payload) do
+      {
+        client_id: client_id,
+        group_id: group_id
+      }
+    end
+    let(:span_name) { Datadog::Tracing::Contrib::Kafka::Ext::SPAN_CONSUMER_LEAVE_GROUP }
+
+    context 'that doesn\'t raise an error' do
+      it 'is expected to send a span' do
+        ActiveSupport::Notifications.instrument('leave_group.consumer.kafka', payload)
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.consumer.leave_group')
+          expect(span.resource).to eq(group_id)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.group')).to eq(group_id)
+          expect(span).to_not have_error
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('kafka')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('consumer.leave_group')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    context 'that raises an error' do
+      let(:error_class) { Class.new(StandardError) }
+
+      it 'is expected to send a span' do
+        # Emulate failure
+        begin
+          ActiveSupport::Notifications.instrument('leave_group.consumer.kafka', payload) do
+            raise error_class
+          end
+        rescue error_class
+          nil
+        end
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.consumer.leave_group')
+          expect(span.resource).to eq(group_id)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.group')).to eq(group_id)
+          expect(span).to have_error
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    it_behaves_like 'analytics for integration' do
+      before { ActiveSupport::Notifications.instrument('leave_group.consumer.kafka', payload) }
+
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'measured span for integration', true do
+      before { ActiveSupport::Notifications.instrument('leave_group.consumer.kafka', payload) }
+    end
+  end
+
+  describe 'consumer.sync_group' do
+    let(:group_id) { SecureRandom.uuid }
+    let(:payload) do
+      {
+        client_id: client_id,
+        group_id: group_id
+      }
+    end
+    let(:span_name) { Datadog::Tracing::Contrib::Kafka::Ext::SPAN_CONSUMER_SYNC_GROUP }
+
+    context 'that doesn\'t raise an error' do
+      it 'is expected to send a span' do
+        ActiveSupport::Notifications.instrument('sync_group.consumer.kafka', payload)
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.consumer.sync_group')
+          expect(span.resource).to eq(group_id)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.group')).to eq(group_id)
+          expect(span).to_not have_error
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('kafka')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('consumer.sync_group')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    context 'that raises an error' do
+      let(:error_class) { Class.new(StandardError) }
+
+      it 'is expected to send a span' do
+        # Emulate failure
+        begin
+          ActiveSupport::Notifications.instrument('sync_group.consumer.kafka', payload) do
+            raise error_class
+          end
+        rescue error_class
+          nil
+        end
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.consumer.sync_group')
+          expect(span.resource).to eq(group_id)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.group')).to eq(group_id)
+          expect(span).to have_error
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    it_behaves_like 'analytics for integration' do
+      before { ActiveSupport::Notifications.instrument('sync_group.consumer.kafka', payload) }
+
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'measured span for integration', true do
+      before { ActiveSupport::Notifications.instrument('sync_group.consumer.kafka', payload) }
+    end
+  end
+
+  describe 'producer.send_messages' do
+    let(:message_count) { rand(10..100) }
+    let(:sent_message_count) { rand(1..message_count) }
+    let(:payload) do
+      {
+        client_id: client_id,
+        message_count: message_count,
+        sent_message_count: sent_message_count
+      }
+    end
+    let(:span_name) { Datadog::Tracing::Contrib::Kafka::Ext::SPAN_SEND_MESSAGES }
+
+    context 'that doesn\'t raise an error' do
+      it 'is expected to send a span' do
+        ActiveSupport::Notifications.instrument('send_messages.producer.kafka', payload)
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.producer.send_messages')
+          expect(span.resource).to eq(span.name)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.message_count')).to eq(message_count)
+          expect(span.get_tag('kafka.sent_message_count')).to eq(sent_message_count)
+          expect(span).to_not have_error
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('kafka')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('producer.send_messages')
+          expect(span.get_tag('span.kind')).to eq('producer')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    context 'that raises an error' do
+      let(:error_class) { Class.new(StandardError) }
+
+      it 'is expected to send a span' do
+        # Emulate failure
+        begin
+          ActiveSupport::Notifications.instrument('send_messages.producer.kafka', payload) do
+            raise error_class
+          end
+        rescue error_class
+          nil
+        end
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.producer.send_messages')
+          expect(span.resource).to eq(span.name)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.message_count')).to eq(message_count)
+          expect(span.get_tag('kafka.sent_message_count')).to eq(sent_message_count)
+          expect(span).to have_error
+          expect(span.get_tag('span.kind')).to eq('producer')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    it_behaves_like 'analytics for integration' do
+      before { ActiveSupport::Notifications.instrument('send_messages.producer.kafka', payload) }
+
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'measured span for integration', true do
+      before { ActiveSupport::Notifications.instrument('send_messages.producer.kafka', payload) }
+    end
+  end
+
+  describe 'producer.deliver_messages' do
+    let(:attempts) { rand(1..10) }
+    let(:message_count) { rand(10..100) }
+    let(:delivered_message_count) { rand(1..message_count) }
+    let(:payload) do
+      {
+        client_id: client_id,
+        attempts: attempts,
+        message_count: message_count,
+        delivered_message_count: delivered_message_count
+      }
+    end
+    let(:span_name) { Datadog::Tracing::Contrib::Kafka::Ext::SPAN_DELIVER_MESSAGES }
+
+    context 'that doesn\'t raise an error' do
+      it 'is expected to send a span' do
+        ActiveSupport::Notifications.instrument('deliver_messages.producer.kafka', payload)
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.producer.deliver_messages')
+          expect(span.resource).to eq(span.name)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.attempts')).to eq(attempts)
+          expect(span.get_tag('kafka.message_count')).to eq(message_count)
+          expect(span.get_tag('kafka.delivered_message_count')).to eq(delivered_message_count)
+          expect(span).to_not have_error
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('kafka')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('producer.deliver_messages')
+          expect(span.get_tag('span.kind')).to eq('producer')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    context 'that raises an error' do
+      let(:error_class) { Class.new(StandardError) }
+
+      it 'is expected to send a span' do
+        # Emulate failure
+        begin
+          ActiveSupport::Notifications.instrument('deliver_messages.producer.kafka', payload) do
+            raise error_class
+          end
+        rescue error_class
+          nil
+        end
+
+        span.tap do |span|
+          expect(span).to_not be nil
+          expect(span.service).to eq(tracer.default_service)
+          expect(span.name).to eq('kafka.producer.deliver_messages')
+          expect(span.resource).to eq(span.name)
+          expect(span.get_tag('kafka.client')).to eq(client_id)
+          expect(span.get_tag('kafka.attempts')).to eq(attempts)
+          expect(span.get_tag('kafka.message_count')).to eq(message_count)
+          expect(span.get_tag('kafka.delivered_message_count')).to eq(delivered_message_count)
+          expect(span).to have_error
+          expect(span.get_tag('span.kind')).to eq('producer')
+          expect(span.get_tag('messaging.system')).to eq('kafka')
+        end
+      end
+    end
+
+    it_behaves_like 'analytics for integration' do
+      before { ActiveSupport::Notifications.instrument('deliver_messages.producer.kafka', payload) }
+
+      let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_ENABLED }
+      let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Kafka::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+    end
+
+    it_behaves_like 'measured span for integration', true do
+      before { ActiveSupport::Notifications.instrument('deliver_messages.producer.kafka', payload) }
+    end
+  end
+end
