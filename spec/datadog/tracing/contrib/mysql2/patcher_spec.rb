@@ -106,4 +106,33 @@ RSpec.describe 'Mysql2::Client patcher' do
           before { query }
         end
 
-    
+        it_behaves_like 'with sql comment propagation', span_op_name: 'mysql2.query'
+
+        it_behaves_like 'environment service name', 'DD_TRACE_MYSQL2_SERVICE_NAME' do
+          let(:configuration_options) { {} }
+        end
+      end
+
+      context 'when a failed query is made' do
+        let(:sql_statement) { 'SELECT INVALID' }
+
+        it 'traces failed queries' do
+          expect { query }.to raise_error(Mysql2::Error)
+
+          expect(spans.count).to eq(1)
+          expect(span.status).to eq(1)
+          expect(span.get_tag('span.kind')).to eq('client')
+          expect(span.get_tag('db.system')).to eq('mysql')
+          expect(span.get_tag('error.message'))
+            .to eq("Unknown column 'INVALID' in 'field list'")
+        end
+
+        it_behaves_like 'with sql comment propagation', span_op_name: 'mysql2.query', error: Mysql2::Error
+
+        it_behaves_like 'environment service name', 'DD_TRACE_MYSQL2_SERVICE_NAME', error: Mysql2::Error do
+          let(:configuration_options) { {} }
+        end
+      end
+    end
+  end
+end
