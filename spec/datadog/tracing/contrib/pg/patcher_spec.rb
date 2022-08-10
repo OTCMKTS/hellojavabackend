@@ -471,4 +471,97 @@ RSpec.describe 'PG::Connection patcher' do
       before { conn.prepare('prepared select 1', 'SELECT $1::int') }
 
       context 'when without a given block' do
-        subject(:exec_prepared) { conn.exec_prepared('prepar
+        subject(:exec_prepared) { conn.exec_prepared('prepared select 1', [1]) }
+
+        context 'when the tracer is disabled' do
+          before { tracer.enabled = false }
+
+          it 'does not write spans' do
+            exec_prepared
+            expect(spans).to be_empty
+          end
+        end
+
+        context 'when the tracer is configured directly' do
+          let(:service_override) { 'pg-override' }
+
+          before { Datadog.configure_onto(conn, service_name: service_override) }
+
+          it 'produces a trace with service override' do
+            exec_prepared
+            expect(spans.count).to eq(1)
+            expect(span.service).to eq(service_override)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE)).to eq(service_override)
+          end
+        end
+
+        context 'when a successful query is made' do
+          statement_name = 'prepared select 1'
+
+          it 'produces a trace' do
+            exec_prepared
+            expect(spans.count).to eq(1)
+            expect(span.name).to eq(Datadog::Tracing::Contrib::Pg::Ext::SPAN_EXEC_PREPARED)
+            expect(span.resource).to eq(statement_name)
+            expect(span.service).to eq('pg')
+            expect(span.type).to eq(Datadog::Tracing::Metadata::Ext::SQL::TYPE)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_KIND))
+              .to eq(Datadog::Tracing::Metadata::Ext::SpanKind::TAG_CLIENT)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Pg::Ext::TAG_DB_NAME)).to eq(dbname)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::TAG_COMPONENT)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::TAG_OPERATION_QUERY)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::DEFAULT_PEER_SERVICE_NAME)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_HOSTNAME)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_INSTANCE)).to eq(dbname)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_USER)).to eq(user)
+            expect(span.get_tag('db.system')).to eq('postgresql')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_TARGET_HOST)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_TARGET_PORT)).to eq(port.to_i)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_DESTINATION_NAME)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_DESTINATION_PORT)).to eq(port.to_i)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_ROW_COUNT)).to eq(1)
+          end
+
+          it_behaves_like 'analytics for integration' do
+            before { exec_prepared }
+            let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Pg::Ext::ENV_ANALYTICS_ENABLED }
+            let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Pg::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+          end
+
+          it_behaves_like 'a peer service span' do
+            before { exec_prepared }
+            let(:peer_hostname) { host }
+          end
+
+          it_behaves_like 'measured span for integration', false do
+            before { exec_prepared }
+          end
+
+          it_behaves_like 'environment service name', 'DD_TRACE_PG_SERVICE_NAME' do
+            let(:configuration_options) { {} }
+          end
+        end
+
+        context 'when a failed query is made' do
+          it 'traces failed queries' do
+            expect { conn.exec_prepared('invalid prepared select 1', ['INVALID']) }.to raise_error(PG::Error)
+            expect(spans.count).to eq(1)
+            expect(span).to have_error
+            expect(span).to have_error_message(
+              include('ERROR') & include('prepared statement "invalid prepared select 1" does not exist')
+            )
+          end
+
+          it_behaves_like 'environment service name', 'DD_TRACE_PG_SERVICE_NAME', error: PG::Error do
+            let(:configuration_options) { {} }
+            subject { conn.exec_prepared('invalid prepared select 1', ['INVALID']) }
+          end
+        end
+      end
+
+      context 'when given a block' do
+        subject(:exec_prepared) do
+          conn.exec_prepared('prepared select 1', [1])
