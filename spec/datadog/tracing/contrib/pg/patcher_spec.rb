@@ -1637,4 +1637,96 @@ RSpec.describe 'PG::Connection patcher' do
         end
 
         context 'when a successful query is made' do
-          it_behaves_like 'with sql comment propagat
+          it_behaves_like 'with sql comment propagation', span_op_name: 'pg.sync.exec.params'
+
+          it 'produces a trace' do
+            sync_exec_params
+
+            expect(spans.count).to eq(1)
+            expect(span.name).to eq(Datadog::Tracing::Contrib::Pg::Ext::SPAN_SYNC_EXEC_PARAMS)
+            expect(span.resource).to eq(sql_statement)
+            expect(span.service).to eq('pg')
+            expect(span.type).to eq(Datadog::Tracing::Metadata::Ext::SQL::TYPE)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_KIND))
+              .to eq(Datadog::Tracing::Metadata::Ext::SpanKind::TAG_CLIENT)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Pg::Ext::TAG_DB_NAME)).to eq(dbname)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::TAG_COMPONENT)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::TAG_OPERATION_QUERY)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+              .to eq(Datadog::Tracing::Contrib::Pg::Ext::DEFAULT_PEER_SERVICE_NAME)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_HOSTNAME)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_INSTANCE)).to eq(dbname)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_USER)).to eq(user)
+            expect(span.get_tag('db.system')).to eq('postgresql')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_TARGET_HOST)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_TARGET_PORT)).to eq(port.to_i)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_DESTINATION_NAME)).to eq(host)
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::NET::TAG_DESTINATION_PORT)).to eq(port.to_i)
+            expect(span.get_tag(Datadog::Tracing::Contrib::Ext::DB::TAG_ROW_COUNT)).to eq(1)
+          end
+
+          it_behaves_like 'analytics for integration' do
+            before { sync_exec_params }
+            let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Pg::Ext::ENV_ANALYTICS_ENABLED }
+            let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Pg::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+          end
+
+          it_behaves_like 'a peer service span' do
+            before { sync_exec_params }
+            let(:peer_hostname) { host }
+          end
+
+          it_behaves_like 'measured span for integration', false do
+            before { sync_exec_params }
+          end
+
+          it_behaves_like 'environment service name', 'DD_TRACE_PG_SERVICE_NAME' do
+            let(:configuration_options) { {} }
+          end
+        end
+
+        context 'when a failed query is made' do
+          let(:sql_statement) { 'SELECT $1;' }
+
+          subject(:sync_exec_params) { conn.sync_exec_params(sql_statement, ['INVALID']) }
+
+          it_behaves_like 'with sql comment propagation', span_op_name: 'pg.sync.exec.params', error: PG::Error
+
+          it 'traces failed queries' do
+            expect { sync_exec_params }.to raise_error(PG::Error)
+
+            expect(spans.count).to eq(1)
+            expect(span).to have_error
+            expect(span).to have_error_message(include('ERROR') & include('could not determine data type of parameter $1'))
+          end
+
+          it_behaves_like 'environment service name', 'DD_TRACE_PG_SERVICE_NAME', error: PG::Error do
+            let(:configuration_options) { {} }
+          end
+        end
+      end
+    end
+
+    describe '#sync_exec_prepared' do
+      before do
+        skip('pg < 1.1.0 does not support #sync_exec_prepared') if Gem::Version.new(PG::VERSION) < Gem::Version.new('1.1.0')
+        conn.prepare('prepared select 1', 'SELECT $1::int')
+      end
+
+      context 'when without a given block' do
+        subject(:sync_exec_prepared) { conn.sync_exec_prepared('prepared select 1', [1]) }
+        context 'when the tracer is disabled' do
+          before { tracer.enabled = false }
+
+          it 'does not write spans' do
+            sync_exec_prepared
+            expect(spans).to be_empty
+          end
+        end
+
+        context 'when the tracer is configured directly' do
+          let(:service_override) { 'pg-override' }
+
+          before { Datadog.confi
