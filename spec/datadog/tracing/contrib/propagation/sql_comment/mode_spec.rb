@@ -37,4 +37,9 @@ RSpec.describe Datadog::Tracing::Contrib::Propagation::SqlComment::Mode do
       ['undefined', false]
     ].each do |string, result|
       context "when given `#{string}`" do
-      
+        subject { described_class.new(string).full? }
+        it { is_expected.to be result }
+      end
+    end
+  end
+end
