@@ -196,3 +196,157 @@ RSpec.describe 'Presto::Client instrumentation' do
 
           it_behaves_like 'a Presto trace'
         end
+
+        context 'with a nil model version' do
+          let(:model_version) { nil }
+
+          it_behaves_like 'a Presto trace'
+        end
+      end
+    end
+
+    shared_examples_for 'a synchronous query trace' do
+      it 'is a synchronous query trace' do
+        expect(span.get_tag('presto.query.async')).to eq('false')
+      end
+    end
+
+    shared_examples_for 'an asynchronous query trace' do
+      it 'is an asynchronous query trace' do
+        expect(span.get_tag('presto.query.async')).to eq('true')
+      end
+    end
+
+    shared_examples_for 'a sampled trace' do
+      it_behaves_like 'analytics for integration' do
+        let(:analytics_enabled_var) { Datadog::Tracing::Contrib::Presto::Ext::ENV_ANALYTICS_ENABLED }
+        let(:analytics_sample_rate_var) { Datadog::Tracing::Contrib::Presto::Ext::ENV_ANALYTICS_SAMPLE_RATE }
+      end
+
+      it_behaves_like 'measured span for integration', false
+
+      it_behaves_like 'a peer service span' do
+        let(:peer_hostname) { host }
+      end
+    end
+
+    describe '#run operation' do
+      before { client.run('SELECT 1') }
+
+      let(:operation) { 'query' }
+
+      it_behaves_like 'a Presto trace'
+      it_behaves_like 'a configurable Presto trace'
+      it_behaves_like 'a synchronous query trace'
+      it_behaves_like 'a sampled trace'
+
+      it 'has a query resource'  do
+        expect(span.resource).to eq('SELECT 1')
+      end
+
+      it 'is SQL type' do
+        expect(span.span_type).to eq('sql')
+      end
+
+      context 'a failed query' do
+        before do
+          clear_traces!
+          begin
+            client.run('SELECT banana')
+          rescue Presto::Client::PrestoQueryError
+            # do nothing
+          end
+        end
+
+        it_behaves_like 'a Presto trace'
+        it_behaves_like 'a configurable Presto trace'
+
+        it 'has a query resource'  do
+          expect(span.resource).to eq('SELECT banana')
+        end
+
+        it 'is an error' do
+          expect(span).to have_error
+          expect(span).to have_error_type('Presto::Client::PrestoQueryError')
+          expect(span).to have_error_message(/Column 'banana' cannot be resolved/)
+        end
+      end
+    end
+
+    describe '#query operation' do
+      let(:operation) { 'query' }
+
+      shared_examples_for 'a query trace' do
+        it 'has a query resource' do
+          expect(span.resource).to eq('SELECT 1')
+        end
+
+        it 'is SQL type' do
+          expect(span.span_type).to eq('sql')
+        end
+      end
+
+      context 'with no block paramter' do
+        before { client.query('SELECT 1') }
+
+        it_behaves_like 'a Presto trace'
+        it_behaves_like 'a configurable Presto trace'
+        it_behaves_like 'a query trace'
+        it_behaves_like 'a synchronous query trace'
+        it_behaves_like 'a sampled trace'
+      end
+
+      context 'given a block parameter' do
+        before { client.query('SELECT 1') { nil } }
+
+        it_behaves_like 'a Presto trace'
+        it_behaves_like 'a configurable Presto trace'
+        it_behaves_like 'a query trace'
+        it_behaves_like 'an asynchronous query trace'
+        it_behaves_like 'a sampled trace'
+      end
+    end
+
+    describe '#kill operation' do
+      before do
+        client.kill('a_query_id')
+      end
+
+      let(:operation) { 'kill' }
+
+      it_behaves_like 'a Presto trace'
+      it_behaves_like 'a configurable Presto trace'
+      it_behaves_like 'a sampled trace'
+
+      it 'has a kill resource' do
+        expect(span.resource).to eq(Datadog::Tracing::Contrib::Presto::Ext::SPAN_KILL)
+      end
+
+      it 'has a query_id tag' do
+        expect(span.get_tag('presto.query.id')).to eq('a_query_id')
+      end
+
+      it 'is DB type' do
+        expect(span.span_type).to eq('db')
+      end
+    end
+
+    describe '#run_with_names operation' do
+      before { client.run_with_names('SELECT 1') }
+
+      let(:operation) { 'query' }
+
+      it_behaves_like 'a Presto trace'
+      it_behaves_like 'a configurable Presto trace'
+      it_behaves_like 'a sampled trace'
+
+      it 'has a query resource' do
+        expect(span.resource).to eq('SELECT 1')
+      end
+
+      it 'is SQL type' do
+        expect(span.span_type).to eq('sql')
+      end
+    end
+  end
+end
