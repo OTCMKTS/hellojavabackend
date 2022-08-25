@@ -115,4 +115,117 @@ RSpec.describe 'Rack integration tests' do
           end
 
           context 'and quantization activated for URL base' do
-            let(:rack_opti
+            let(:rack_options) { { quantize: { base: :show } } }
+
+            it do
+              expect(span.get_tag('http.url')).to eq('http://example.org/success/')
+              expect(span.get_tag('http.base_url')).to be_nil
+              expect(span).to be_root_span
+            end
+          end
+
+          it { expect(trace.resource).to eq('GET 200') }
+        end
+
+        context 'with query string parameters' do
+          let(:route) { '/success?foo=bar' }
+
+          context 'and default quantization' do
+            let(:rack_options) { { quantize: {} } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              expect(span.get_tag('http.url')).to eq('/success?foo')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+
+          context 'and quantization activated for the query' do
+            let(:rack_options) { { quantize: { query: { show: ['foo'] } } } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              expect(span.get_tag('http.url')).to eq('/success?foo=bar')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+        end
+
+        context 'with REQUEST_URI being a path' do
+          subject(:response) { get '/success?foo=bar', {}, 'REQUEST_URI' => '/success?foo=bar' }
+
+          context 'and default quantization' do
+            let(:rack_options) { { quantize: {} } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # However, that query string will be quantized.
+              expect(span.get_tag('http.url')).to eq('/success?foo')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+
+          context 'and quantization activated for the query' do
+            let(:rack_options) { { quantize: { query: { show: ['foo'] } } } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # The query string will not be quantized, per the option.
+              expect(span.get_tag('http.url')).to eq('/success?foo=bar')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+
+          context 'and quantization activated for base' do
+            let(:rack_options) { { quantize: { base: :show } } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # The query string will not be quantized, per the option.
+              expect(span.get_tag('http.url')).to eq('http://example.org/success?foo')
+              expect(span.get_tag('http.base_url')).to be_nil
+              expect(span).to be_root_span
+            end
+          end
+        end
+
+        context 'with REQUEST_URI containing base URI' do
+          subject(:response) { get '/success?foo=bar', {}, 'REQUEST_URI' => 'http://example.org/success?foo=bar' }
+
+          context 'and default quantization' do
+            let(:rack_options) { { quantize: {} } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # However, that query string will be quantized.
+              expect(span.get_tag('http.url')).to eq('/success?foo')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+
+          context 'and quantization activated for the query' do
+            let(:rack_options) { { quantize: { query: { show: ['foo'] } } } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+  
