@@ -335,4 +335,111 @@ RSpec.describe 'Rack integration tests' do
           expect(rack_span.resource).to eq('GET 200')
           expect(rack_span.get_tag('http.method')).to eq('GET')
           expect(rack_span.get_tag('http.status_code')).to eq('200')
-          expect(rack_span.status).t
+          expect(rack_span.status).to eq(0)
+          expect(rack_span.get_tag('component')).to eq('rack')
+          expect(rack_span.get_tag('operation')).to eq('request')
+          expect(rack_span.get_tag('span.kind')).to eq('server')
+        end
+      end
+
+      describe 'when request queueing excludes the request time' do
+        let(:rack_options) { { request_queuing: :exclude_request } }
+
+        it 'creates web_server_span and rack span' do
+          get 'request_queuing_enabled',
+            nil,
+            { Datadog::Tracing::Contrib::Rack::QueueTime::REQUEST_START => "t=#{Time.now.to_f}" }
+
+          expect(trace.resource).to eq('GET 200')
+
+          expect(spans).to have(3).items
+
+          server_request_span = spans[1]
+          server_queue_span = spans[0]
+          rack_span = spans[2]
+
+          expect(server_request_span).to be_root_span
+          expect(server_request_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_PROXY_REQUEST)
+          expect(server_request_span.span_type).to eq('proxy')
+          expect(server_request_span.service).to eq('web-server')
+          expect(server_request_span.resource).to eq('http.proxy.request')
+          expect(server_request_span.get_tag('component')).to eq('http_proxy')
+          expect(server_request_span.get_tag('operation')).to eq('request')
+          expect(server_request_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_request_span.status).to eq(0)
+          expect(server_request_span.get_tag('span.kind')).to eq('proxy')
+
+          expect(server_queue_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_PROXY_QUEUE)
+          expect(server_queue_span.span_type).to eq('proxy')
+          expect(server_queue_span.service).to eq('web-server')
+          expect(server_queue_span.resource).to eq('http.proxy.queue')
+          expect(server_queue_span.get_tag('component')).to eq('http_proxy')
+          expect(server_queue_span.get_tag('operation')).to eq('queue')
+          expect(server_queue_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_queue_span.status).to eq(0)
+          expect(server_queue_span.get_tag('span.kind')).to eq('proxy')
+          expect(server_queue_span).to be_measured
+
+          expect(rack_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST)
+          expect(rack_span.span_type).to eq('web')
+          expect(rack_span.service).to eq(tracer.default_service)
+          expect(rack_span.resource).to eq('GET 200')
+          expect(rack_span.get_tag('http.method')).to eq('GET')
+          expect(rack_span.get_tag('http.status_code')).to eq('200')
+          expect(rack_span.status).to eq(0)
+          expect(rack_span.get_tag('component')).to eq('rack')
+          expect(rack_span.get_tag('operation')).to eq('request')
+          expect(rack_span.get_tag('span.kind')).to eq('server')
+        end
+      end
+    end
+
+    context 'with a route that has a client error' do
+      let(:routes) do
+        proc do
+          map '/failure/' do
+            run(proc { |_env| [400, { 'Content-Type' => 'text/html' }, ['KO']] })
+          end
+        end
+      end
+
+      before do
+        expect(response.status).to eq(400)
+        expect(spans).to have(1).items
+      end
+
+      describe 'GET request' do
+        subject(:response) { get '/failure/' }
+
+        it do
+          expect(span.name).to eq('rack.request')
+          expect(span.span_type).to eq('web')
+          expect(span.service).to eq(Datadog.configuration.service)
+          expect(span.resource).to eq('GET 400')
+          expect(span.get_tag('http.method')).to eq('GET')
+          expect(span.get_tag('http.status_code')).to eq('400')
+          expect(span.get_tag('http.url')).to eq('/failure/')
+          expect(span.get_tag('http.base_url')).to eq('http://example.org')
+          expect(span.status).to eq(0)
+          expect(span).to be_root_span
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+            .to eq('rack')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+            .to eq('request')
+          expect(span.get_tag('span.kind'))
+            .to eq('server')
+        end
+      end
+    end
+
+    context 'with a route that has a server error' do
+      let(:routes) do
+        proc do
+          map '/server_error/' do
+            run(proc { |_env| [500, { 'Content-Type' => 'text/html' }, ['KO']] })
+          end
+        end
+      end
+
+      before do
+        is_expected.to be_server_error
