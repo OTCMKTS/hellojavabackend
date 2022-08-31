@@ -228,4 +228,111 @@ RSpec.describe 'Rack integration tests' do
             it_behaves_like 'a rack GET 200 span'
 
             it do
-  
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # The query string will not be quantized, per the option.
+              expect(span.get_tag('http.url')).to eq('/success?foo=bar')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+            end
+          end
+
+          context 'and quantization activated for base' do
+            let(:rack_options) { { quantize: { base: :show } } }
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              # Since REQUEST_URI is set (usually provided by WEBrick/Puma)
+              # it uses REQUEST_URI, which has query string parameters.
+              # The query string will not be quantized, per the option.
+              expect(span.get_tag('http.url')).to eq('http://example.org/success?foo')
+              expect(span.get_tag('http.base_url')).to be_nil
+              expect(span).to be_root_span
+            end
+          end
+        end
+
+        context 'with sub-route' do
+          let(:route) { '/success/100' }
+
+          it_behaves_like 'a rack GET 200 span'
+
+          it do
+            expect(span.get_tag('http.url')).to eq('/success/100')
+            expect(span.get_tag('http.base_url')).to eq('http://example.org')
+            expect(span).to be_root_span
+          end
+        end
+      end
+
+      describe 'POST request' do
+        subject(:response) { post route }
+
+        context 'without parameters' do
+          let(:route) { '/success/' }
+
+          it do
+            expect(span.name).to eq('rack.request')
+            expect(span.span_type).to eq('web')
+            expect(span.service).to eq(Datadog.configuration.service)
+            expect(span.resource).to eq('POST 200')
+            expect(span.get_tag('http.method')).to eq('POST')
+            expect(span.get_tag('http.status_code')).to eq('200')
+            expect(span.get_tag('http.url')).to eq('/success/')
+            expect(span.get_tag('http.base_url')).to eq('http://example.org')
+            expect(span.status).to eq(0)
+            expect(span).to be_root_span
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+              .to eq('rack')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq('request')
+            expect(span.get_tag('span.kind'))
+              .to eq('server')
+          end
+        end
+      end
+    end
+
+    context 'when `request_queuing` enabled' do
+      let(:routes) do
+        proc do
+          map '/request_queuing_enabled' do
+            run(proc { |_env| [200, { 'Content-Type' => 'text/html' }, ['OK']] })
+          end
+        end
+      end
+
+      describe 'when request queueing includes the request time' do
+        let(:rack_options) { { request_queuing: :include_request } }
+
+        it 'creates web_server_span and rack span' do
+          get 'request_queuing_enabled',
+            nil,
+            { Datadog::Tracing::Contrib::Rack::QueueTime::REQUEST_START => "t=#{Time.now.to_f}" }
+
+          expect(trace.resource).to eq('GET 200')
+
+          expect(spans).to have(2).items
+
+          server_queue_span = spans[0]
+          rack_span = spans[1]
+
+          expect(server_queue_span).to be_root_span
+          expect(server_queue_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_SERVER_QUEUE)
+          expect(server_queue_span.span_type).to eq('proxy')
+          expect(server_queue_span.service).to eq('web-server')
+          expect(server_queue_span.resource).to eq('http_server.queue')
+          expect(server_queue_span.get_tag('component')).to eq('rack')
+          expect(server_queue_span.get_tag('operation')).to eq('queue')
+          expect(server_queue_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_queue_span.status).to eq(0)
+          expect(server_queue_span.get_tag('span.kind')).to eq('server')
+
+          expect(rack_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST)
+          expect(rack_span.span_type).to eq('web')
+          expect(rack_span.service).to eq(tracer.default_service)
+          expect(rack_span.resource).to eq('GET 200')
+          expect(rack_span.get_tag('http.method')).to eq('GET')
+          expect(rack_span.get_tag('http.status_code')).to eq('200')
+          expect(rack_span.status).t
