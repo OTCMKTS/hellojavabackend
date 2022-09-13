@@ -548,4 +548,115 @@ RSpec.describe 'Rack integration tests' do
               .to eq('rack')
             expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
               .to eq('request')
-            expect(span.get_tag('span.kind
+            expect(span.get_tag('span.kind'))
+              .to eq('server')
+          end
+        end
+      end
+    end
+
+    context 'with a route with a nested application' do
+      context 'that is OK' do
+        let(:routes) do
+          proc do
+            map '/app/' do
+              run(
+                proc do |env|
+                  # This should be considered a web framework that can alter
+                  # the request span after routing / controller processing
+                  request_span = env[Datadog::Tracing::Contrib::Rack::Ext::RACK_ENV_REQUEST_SPAN]
+                  request_span.resource = 'GET /app/'
+                  request_span.set_tag('http.method', 'GET_V2')
+                  request_span.set_tag('http.status_code', 201)
+                  request_span.set_tag('http.url', '/app/static/')
+
+                  [200, { 'Content-Type' => 'text/html' }, ['OK']]
+                end
+              )
+            end
+          end
+        end
+
+        before do
+          is_expected.to be_ok
+          expect(spans).to have(1).items
+        end
+
+        describe 'GET request' do
+          subject(:response) { get route }
+
+          context 'without parameters' do
+            let(:route) { '/app/posts/100' }
+
+            it do
+              expect(trace.resource).to eq('GET /app/')
+
+              expect(span.name).to eq('rack.request')
+              expect(span.span_type).to eq('web')
+              expect(span.service).to eq(Datadog.configuration.service)
+              expect(span.resource).to eq('GET /app/')
+              expect(span.get_tag('http.method')).to eq('GET_V2')
+              expect(span.get_tag('http.status_code')).to eq('201')
+              expect(span.get_tag('http.url')).to eq('/app/static/')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span.status).to eq(0)
+              expect(span).to be_root_span
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+                .to eq('rack')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('request')
+              expect(span.get_tag('span.kind'))
+                .to eq('server')
+            end
+          end
+        end
+      end
+
+      context 'when `request_queuing` enabled with `:include_request` and trace resource overwritten by nested app' do
+        let(:rack_options) { { request_queuing: :include_request } }
+        let(:routes) do
+          proc do
+            map '/resource_override' do
+              run(
+                proc do |_env|
+                  Datadog::Tracing.trace('nested_app', resource: 'UserController#show') do |span_op, trace_op|
+                    trace_op.resource = span_op.resource
+
+                    [200, { 'Content-Type' => 'text/html' }, ['OK']]
+                  end
+                end
+              )
+            end
+          end
+        end
+
+        it 'creates a web_server span and rack span with resource overriden' do
+          get '/resource_override',
+            nil,
+            { Datadog::Tracing::Contrib::Rack::QueueTime::REQUEST_START => "t=#{Time.now.to_f}" }
+
+          expect(trace.resource).to eq('UserController#show')
+
+          expect(spans).to have(3).items
+
+          server_queue_span = spans[0]
+          rack_span = spans[2]
+          nested_app_span = spans[1]
+
+          expect(server_queue_span).to be_root_span
+          expect(server_queue_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_SERVER_QUEUE)
+          expect(server_queue_span.span_type).to eq('proxy')
+          expect(server_queue_span.service).to eq('web-server')
+          expect(server_queue_span.resource).to eq('http_server.queue')
+          expect(server_queue_span.get_tag('component')).to eq('rack')
+          expect(server_queue_span.get_tag('operation')).to eq('queue')
+          expect(server_queue_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_queue_span.status).to eq(0)
+          expect(server_queue_span.get_tag('span.kind')).to eq('server')
+
+          expect(rack_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST)
+          expect(rack_span.span_type).to eq('web')
+          expect(rack_span.service).to eq(tracer.default_service)
+          expect(rack_span.resource).to eq('UserController#show')
+          expect(rack_span.get_tag('http.method')).to eq('GET')
+          expect(rack_
