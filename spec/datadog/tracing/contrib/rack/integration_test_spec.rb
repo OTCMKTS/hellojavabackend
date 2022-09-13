@@ -443,3 +443,109 @@ RSpec.describe 'Rack integration tests' do
 
       before do
         is_expected.to be_server_error
+        expect(spans).to have(1).items
+      end
+
+      describe 'GET request' do
+        subject(:response) { get '/server_error/' }
+
+        it do
+          expect(span.name).to eq('rack.request')
+          expect(span.span_type).to eq('web')
+          expect(span.service).to eq(Datadog.configuration.service)
+          expect(span.resource).to eq('GET 500')
+          expect(span.get_tag('http.method')).to eq('GET')
+          expect(span.get_tag('http.status_code')).to eq('500')
+          expect(span.get_tag('http.url')).to eq('/server_error/')
+          expect(span.get_tag('http.base_url')).to eq('http://example.org')
+          expect(span.get_tag('error.stack')).to be nil
+          expect(span.status).to eq(1)
+          expect(span).to be_root_span
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+            .to eq('rack')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+            .to eq('request')
+          expect(span.get_tag('span.kind'))
+            .to eq('server')
+        end
+      end
+    end
+
+    context 'with a route that raises an exception' do
+      context 'that is well known' do
+        let(:routes) do
+          proc do
+            map '/exception/' do
+              run(proc { |_env| raise StandardError, 'Unable to process the request' })
+            end
+          end
+        end
+
+        before do
+          expect { response }.to raise_error(StandardError)
+          expect(spans).to have(1).items
+        end
+
+        describe 'GET request' do
+          subject(:response) { get '/exception/' }
+
+          it do
+            expect(span.name).to eq('rack.request')
+            expect(span.span_type).to eq('web')
+            expect(span.service).to eq(Datadog.configuration.service)
+            expect(span.resource).to eq('GET')
+            expect(span.get_tag('http.method')).to eq('GET')
+            expect(span.get_tag('http.status_code')).to be nil
+            expect(span.get_tag('http.url')).to eq('/exception/')
+            expect(span.get_tag('http.base_url')).to eq('http://example.org')
+            expect(span.get_tag('error.type')).to eq('StandardError')
+            expect(span.get_tag('error.message')).to eq('Unable to process the request')
+            expect(span.get_tag('error.stack')).to_not be nil
+            expect(span.status).to eq(1)
+            expect(span).to be_root_span
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+              .to eq('rack')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq('request')
+            expect(span.get_tag('span.kind'))
+              .to eq('server')
+          end
+        end
+      end
+
+      context 'that is not a standard error' do
+        let(:routes) do
+          proc do
+            map '/exception/' do
+              run(proc { |_env| raise NoMemoryError, 'Non-standard error' })
+            end
+          end
+        end
+
+        before do
+          expect { response }.to raise_error(NoMemoryError)
+          expect(spans).to have(1).items
+        end
+
+        describe 'GET request' do
+          subject(:response) { get '/exception/' }
+
+          it do
+            expect(span.name).to eq('rack.request')
+            expect(span.span_type).to eq('web')
+            expect(span.service).to eq(Datadog.configuration.service)
+            expect(span.resource).to eq('GET')
+            expect(span.get_tag('http.method')).to eq('GET')
+            expect(span.get_tag('http.status_code')).to be nil
+            expect(span.get_tag('http.url')).to eq('/exception/')
+            expect(span.get_tag('http.base_url')).to eq('http://example.org')
+            expect(span.get_tag('error.type')).to eq('NoMemoryError')
+            expect(span.get_tag('error.message')).to eq('Non-standard error')
+            expect(span.get_tag('error.stack')).to_not be nil
+            expect(span.status).to eq(1)
+            expect(span).to be_root_span
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+              .to eq('rack')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq('request')
+            expect(span.get_tag('span.kind
