@@ -659,4 +659,101 @@ RSpec.describe 'Rack integration tests' do
           expect(rack_span.service).to eq(tracer.default_service)
           expect(rack_span.resource).to eq('UserController#show')
           expect(rack_span.get_tag('http.method')).to eq('GET')
-          expect(rack_
+          expect(rack_span.get_tag('http.status_code')).to eq('200')
+          expect(rack_span.status).to eq(0)
+          expect(rack_span.get_tag('component')).to eq('rack')
+          expect(rack_span.get_tag('operation')).to eq('request')
+          expect(rack_span.get_tag('span.kind')).to eq('server')
+
+          expect(nested_app_span.name).to eq('nested_app')
+          expect(nested_app_span.resource).to eq('UserController#show')
+        end
+      end
+
+      context 'when `request_queuing` enabled with `:exclude_request` and trace resource overwritten by nested app' do
+        let(:rack_options) { { request_queuing: :exclude_request } }
+        let(:routes) do
+          proc do
+            map '/resource_override' do
+              run(
+                proc do |_env|
+                  Datadog::Tracing.trace('nested_app', resource: 'UserController#show') do |span_op, trace_op|
+                    trace_op.resource = span_op.resource
+
+                    [200, { 'Content-Type' => 'text/html' }, ['OK']]
+                  end
+                end
+              )
+            end
+          end
+        end
+
+        it 'creates 2 web_server spans and rack span with resource overriden' do
+          get '/resource_override',
+            nil,
+            { Datadog::Tracing::Contrib::Rack::QueueTime::REQUEST_START => "t=#{Time.now.to_f}" }
+
+          expect(trace.resource).to eq('UserController#show')
+
+          expect(spans).to have(4).items
+
+          server_request_span = spans[1]
+          server_queue_span = spans[0]
+          rack_span = spans[3]
+          nested_app_span = spans[2]
+
+          expect(server_request_span).to be_root_span
+          expect(server_request_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_PROXY_REQUEST)
+          expect(server_request_span.span_type).to eq('proxy')
+          expect(server_request_span.service).to eq('web-server')
+          expect(server_request_span.resource).to eq('http.proxy.request')
+          expect(server_request_span.get_tag('component')).to eq('http_proxy')
+          expect(server_request_span.get_tag('operation')).to eq('request')
+          expect(server_request_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_request_span.status).to eq(0)
+          expect(server_request_span.get_tag('span.kind')).to eq('proxy')
+
+          expect(server_queue_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_HTTP_PROXY_QUEUE)
+          expect(server_queue_span.span_type).to eq('proxy')
+          expect(server_queue_span.service).to eq('web-server')
+          expect(server_queue_span.resource).to eq('http.proxy.queue')
+          expect(server_queue_span.get_tag('component')).to eq('http_proxy')
+          expect(server_queue_span.get_tag('operation')).to eq('queue')
+          expect(server_queue_span.get_tag('peer.service')).to eq('web-server')
+          expect(server_queue_span.status).to eq(0)
+          expect(server_queue_span.get_tag('span.kind')).to eq('proxy')
+          expect(server_queue_span).to be_measured
+
+          expect(rack_span.name).to eq(Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST)
+          expect(rack_span.span_type).to eq('web')
+          expect(rack_span.service).to eq(tracer.default_service)
+          expect(rack_span.resource).to eq('UserController#show')
+          expect(rack_span.get_tag('http.method')).to eq('GET')
+          expect(rack_span.get_tag('http.status_code')).to eq('200')
+          expect(rack_span.status).to eq(0)
+          expect(rack_span.get_tag('component')).to eq('rack')
+          expect(rack_span.get_tag('operation')).to eq('request')
+          expect(rack_span.get_tag('span.kind')).to eq('server')
+
+          expect(nested_app_span.name).to eq('nested_app')
+          expect(nested_app_span.resource).to eq('UserController#show')
+        end
+      end
+
+      context 'that raises a server error' do
+        before do
+          is_expected.to be_server_error
+          expect(spans).to have(1).items
+        end
+
+        context 'while setting status' do
+          let(:routes) do
+            proc do
+              map '/app/500/' do
+                run(
+                  proc do |env|
+                    # this should be considered a web framework that can alter
+                    # the request span after routing / controller processing
+                    request_span = env[Datadog::Tracing::Contrib::Rack::Ext::RACK_ENV_REQUEST_SPAN]
+                    request_span.status = 1
+                 
