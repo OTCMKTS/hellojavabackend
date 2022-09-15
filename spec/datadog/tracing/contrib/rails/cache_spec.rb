@@ -280,4 +280,121 @@ RSpec.describe 'Rails cache' do
   end
 
   describe '#fetch' do
-    subject(:fetch) 
+    subject(:fetch) { cache.fetch(key) { 'default' } }
+
+    it_behaves_like 'a no-op when instrumentation is disabled'
+
+    it_behaves_like 'measured span for integration', false do
+      before { fetch }
+      # Choose either GET or SET span
+
+      let(:span) { spans.sample }
+    end
+
+    context 'with exception' do
+      subject(:fetch) { cache.fetch('exception') { raise 'oops' } }
+
+      it do
+        expect { fetch }.to raise_error(StandardError)
+
+        expect(span.name).to eq('rails.cache')
+        expect(span.span_type).to eq('cache')
+        expect(span.resource).to eq('GET')
+        expect(span.service).to eq('rails-cache')
+        expect(span.get_tag('rails.cache.backend').to_s).to eq('file_store')
+        expect(span.get_tag('rails.cache.key')).to eq('exception')
+        expect(span.get_tag('error.type')).to eq('RuntimeError')
+        expect(span.get_tag('error.message')).to eq('oops')
+
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+          .to eq('active_support')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('cache')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+          .to eq('rails-cache')
+      end
+    end
+  end
+
+  describe '#fetch_multi' do
+    subject(:fetch_multi) { cache.fetch_multi(*multi_keys, expires_in: 42) { |key| 50 + key[-1].to_i } }
+
+    context 'when the method is defined' do
+      before do
+        unless ::ActiveSupport::Cache::Store.public_method_defined?(:fetch_multi)
+          skip 'Test is not applicable to this Rails version'
+        end
+      end
+
+      it_behaves_like 'a no-op when instrumentation is disabled'
+
+      it_behaves_like 'measured span for integration', false do
+        before { fetch_multi }
+        # Choose either GET or SET span
+
+        let(:span) { spans.sample }
+      end
+
+      context 'with exception' do
+        subject(:fetch_multi) { cache.fetch_multi('exception', 'another', 'one') { raise 'oops' } }
+
+        it do
+          expect { fetch_multi }.to raise_error(StandardError)
+          expect(span.name).to eq('rails.cache')
+          expect(span.span_type).to eq('cache')
+          expect(span.resource).to eq('MGET')
+          expect(span.service).to eq('rails-cache')
+          expect(span.get_tag('rails.cache.backend').to_s).to eq('file_store')
+          expect(span.get_tag('rails.cache.keys')).to eq('["exception", "another", "one"]')
+          expect(span.get_tag('error.type')).to eq('RuntimeError')
+          expect(span.get_tag('error.message')).to eq('oops')
+
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+            .to eq('active_support')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+            .to eq('cache')
+          expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+            .to eq('rails-cache')
+        end
+      end
+    end
+
+    context 'when the method is not defined' do
+      before do
+        if ::ActiveSupport::Cache::Store.public_method_defined?(:fetch_multi)
+          skip 'Test is not applicable to this Rails version'
+        end
+      end
+
+      it do
+        expect(::ActiveSupport::Cache::Store.ancestors).not_to(
+          include(::Datadog::Tracing::Contrib::ActiveSupport::Cache::Instrumentation::FetchMulti)
+        )
+      end
+
+      it do
+        expect { subject }.to raise_error NoMethodError
+      end
+    end
+  end
+
+  context 'with very large cache key' do
+    it 'truncates key too large' do
+      max_key_size = Datadog::Tracing::Contrib::ActiveSupport::Ext::QUANTIZE_CACHE_MAX_KEY_SIZE
+      large_key = ''.ljust(max_key_size * 2, SecureRandom.hex)
+      cache.write(large_key, 'foobar')
+
+      expect(large_key.size).to be > max_key_size
+      expect(span.name).to eq('rails.cache')
+      expect(span.get_tag('rails.cache.key')).to have(max_key_size).items
+      expect(span.get_tag('rails.cache.key')).to end_with('...')
+
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_support')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('cache')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+        .to eq('rails-cache')
+    end
+  end
+end
