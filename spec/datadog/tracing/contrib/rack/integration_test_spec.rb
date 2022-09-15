@@ -881,4 +881,128 @@ RSpec.describe 'Rack integration tests' do
             run(
               proc do |_env|
                 response_headers = {
-                  'Content-Type' => 'text/
+                  'Content-Type' => 'text/html',
+                  'Cache-Control' => 'max-age=3600',
+                  'ETag' => '"737060cd8c284d8af7ad3082f209582d"',
+                  'Expires' => 'Thu, 01 Dec 1994 16:00:00 GMT',
+                  'Last-Modified' => 'Tue, 15 Nov 1994 12:45:26 GMT',
+                  'X-Request-ID' => 'f058ebd6-02f7-4d3f-942e-904344e8cde5',
+                  'X-Fake-Response' => 'Don\'t tag me.'
+                }
+                [200, response_headers, ['OK']]
+              end
+            )
+          end
+        end
+      end
+
+      context 'when configured to tag headers' do
+        before do
+          Datadog.configure do |c|
+            c.tracing.instrument :rack,
+              headers: {
+                request: [
+                  'Cache-Control'
+                ],
+                response: [
+                  'Content-Type',
+                  'Cache-Control',
+                  'Content-Type',
+                  'ETag',
+                  'Expires',
+                  'Last-Modified',
+                  # This lowercase 'Id' header doesn't match.
+                  # Ensure middleware allows for case-insensitive matching.
+                  'X-Request-Id'
+                ]
+              }
+          end
+        end
+
+        after do
+          # Reset to default headers
+          Datadog.configure do |c|
+            c.tracing.instrument :rack, headers: {}
+          end
+        end
+
+        describe 'GET request' do
+          context 'that does not sent user agent' do
+            subject(:response) { get '/headers/', {}, headers }
+
+            let(:headers) do
+              {}
+            end
+
+            before do
+              is_expected.to be_ok
+              expect(spans).to have(1).items
+            end
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              expect(span.get_tag('http.useragent')).to be nil
+              expect(span.get_tag('http.request.headers.user-agent')).to be nil
+            end
+          end
+
+          context 'that sends user agent' do
+            subject(:response) { get '/headers/', {}, headers }
+
+            let(:headers) do
+              {
+                'HTTP_USER_AGENT' => 'SuperUserAgent',
+              }
+            end
+
+            before do
+              is_expected.to be_ok
+              expect(spans).to have(1).items
+            end
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              expect(span.get_tag('http.useragent')).to eq('SuperUserAgent')
+              expect(span.get_tag('http.request.headers.user-agent')).to be nil
+            end
+          end
+
+          context 'that sends headers' do
+            subject(:response) { get '/headers/', {}, headers }
+
+            let(:headers) do
+              {
+                'HTTP_CACHE_CONTROL' => 'no-cache',
+                'HTTP_X_REQUEST_ID' => SecureRandom.uuid,
+                'HTTP_X_FAKE_REQUEST' => 'Don\'t tag me.'
+              }
+            end
+
+            before do
+              is_expected.to be_ok
+              expect(spans).to have(1).items
+            end
+
+            it_behaves_like 'a rack GET 200 span'
+
+            it do
+              expect(span.get_tag('http.url')).to eq('/headers/')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span).to be_root_span
+
+              # Request headers
+              expect(span.get_tag('http.request.headers.cache-control')).to eq('no-cache')
+              # Make sure non-whitelisted headers don't become tags.
+              expect(span.get_tag('http.request.headers.x-request-id')).to be nil
+              expect(span.get_tag('http.request.headers.x-fake-request')).to be nil
+
+              # Response headers
+              expect(span.get_tag('http.response.headers.content-type')).to eq('text/html')
+              expect(span.get_tag('http.response.headers.cache-control')).to eq('max-age=3600')
+              expect(span.get_tag('http.response.headers.etag')).to eq('"737060cd8c284d8af7ad3082f209582d"')
+              expect(span.get_tag('http.response.headers.last-modified')).to eq('Tue, 15 Nov 1994 12:45:26 GMT')
+              expect(span.get_tag('http.response.headers.x-request-id')).to eq('f058ebd6-02f7-4d3f-942e-904344e8cde5')
+              # Make sure non-whitelisted headers don't become tags.
+              expect(span.get_tag(
