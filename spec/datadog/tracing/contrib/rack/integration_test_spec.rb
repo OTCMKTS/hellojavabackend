@@ -756,4 +756,129 @@ RSpec.describe 'Rack integration tests' do
                     # the request span after routing / controller processing
                     request_span = env[Datadog::Tracing::Contrib::Rack::Ext::RACK_ENV_REQUEST_SPAN]
                     request_span.status = 1
-                 
+                    request_span.set_tag('error.stack', 'Handled exception')
+
+                    [500, { 'Content-Type' => 'text/html' }, ['OK']]
+                  end
+                )
+              end
+            end
+          end
+
+          describe 'GET request' do
+            subject(:response) { get '/app/500/' }
+
+            it do
+              expect(span.name).to eq('rack.request')
+              expect(span.span_type).to eq('web')
+              expect(span.service).to eq(Datadog.configuration.service)
+              expect(span.resource).to eq('GET 500')
+              expect(span.get_tag('http.method')).to eq('GET')
+              expect(span.get_tag('http.status_code')).to eq('500')
+              expect(span.get_tag('http.url')).to eq('/app/500/')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span.get_tag('error.stack')).to eq('Handled exception')
+              expect(span.status).to eq(1)
+              expect(span).to be_root_span
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+                .to eq('rack')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('request')
+              expect(span.get_tag('span.kind'))
+                .to eq('server')
+            end
+          end
+        end
+
+        context 'without setting status' do
+          let(:routes) do
+            proc do
+              map '/app/500/' do
+                run(
+                  proc do |env|
+                    # this should be considered a web framework that can alter
+                    # the request span after routing / controller processing
+                    request_span = env[Datadog::Tracing::Contrib::Rack::Ext::RACK_ENV_REQUEST_SPAN]
+                    request_span.set_tag('error.stack', 'Handled exception')
+
+                    [500, { 'Content-Type' => 'text/html' }, ['OK']]
+                  end
+                )
+              end
+            end
+          end
+
+          describe 'GET request' do
+            subject(:response) { get '/app/500/' }
+
+            it do
+              expect(span.name).to eq('rack.request')
+              expect(span.span_type).to eq('web')
+              expect(span.service).to eq(Datadog.configuration.service)
+              expect(span.resource).to eq('GET 500')
+              expect(span.get_tag('http.method')).to eq('GET')
+              expect(span.get_tag('http.status_code')).to eq('500')
+              expect(span.get_tag('http.url')).to eq('/app/500/')
+              expect(span.get_tag('http.base_url')).to eq('http://example.org')
+              expect(span.get_tag('error.stack')).to eq('Handled exception')
+              expect(span.status).to eq(1)
+              expect(span).to be_root_span
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+                .to eq('rack')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('request')
+              expect(span.get_tag('span.kind'))
+                .to eq('server')
+            end
+          end
+        end
+      end
+    end
+
+    context 'with a route that leaks span context' do
+      let(:routes) do
+        app_tracer = tracer
+
+        proc do
+          map '/leak/' do
+            handler = proc do
+              app_tracer.trace('leaky-span-1')
+              app_tracer.trace('leaky-span-2')
+              app_tracer.trace('leaky-span-3')
+
+              [200, { 'Content-Type' => 'text/html' }, ['OK']]
+            end
+
+            run(handler)
+          end
+
+          map '/success/' do
+            run(proc { |_env| [200, { 'Content-Type' => 'text/html' }, ['OK']] })
+          end
+        end
+      end
+
+      describe 'subsequent GET requests' do
+        subject(:responses) { [(get '/leak'), (get '/success')] }
+
+        before do
+          responses.each { |response| expect(response).to be_ok }
+          expect(spans).to have(2).items
+        end
+
+        it do
+          # Ensure the context is properly cleaned between requests.
+          expect(tracer.active_trace).to be nil
+          expect(spans).to have(2).items
+        end
+      end
+    end
+
+    context 'with a route that sets some headers' do
+      let(:routes) do
+        proc do
+          map '/headers/' do
+            run(
+              proc do |_env|
+                response_headers = {
+                  'Content-Type' => 'text/
