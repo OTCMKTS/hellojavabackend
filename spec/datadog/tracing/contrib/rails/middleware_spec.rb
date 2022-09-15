@@ -109,4 +109,156 @@ RSpec.describe 'Rails middleware' do
 
             # This is flaky: depending on test order, this will be the middleware name or
             # it will be GET 200. This is because env['RESPONSE_MIDDLEWARE'] sometimes isn't
-            # set, which causes it to default
+            # set, which causes it to default to GET 200 instead. Probably because some test
+            # isn't cleaning configuration or patches properly. Always passes when run solo.
+            # expect(span.resource).to eq('ActionDispatch::Routing::RouteSet#GET')
+          end
+        end
+      end
+    end
+
+    context 'that raises an exception' do
+      before { get '/' }
+
+      let(:rails_middleware) { [middleware] }
+      let(:middleware) do
+        stub_const(
+          'RaiseExceptionMiddleware',
+          Class.new do
+            def initialize(app)
+              @app = app
+            end
+
+            def call(env)
+              @app.call(env)
+              raise NotImplementedError
+            end
+          end
+        )
+      end
+
+      it do
+        expect(app).to have_kind_of_middleware(middleware)
+        expect(last_response).to be_server_error
+        expect(spans).to have_at_least(2).items
+      end
+
+      context 'rack span' do
+        let(:span) { spans.find { |s| s.name == 'rack.request' } }
+
+        it do
+          expect(trace.resource).to eq('TestController#index')
+
+          expect(span.name).to eq('rack.request')
+          expect(span.span_type).to eq('web')
+          expect(span.resource).to eq('TestController#index')
+          expect(span.get_tag('http.url')).to eq('/')
+          expect(span.get_tag('http.method')).to eq('GET')
+          expect(span.get_tag('http.status_code')).to eq('500')
+          expect(span.get_tag('error.type')).to eq('NotImplementedError')
+          expect(span.get_tag('error.message')).to eq('NotImplementedError')
+          expect(span).to have_error
+          expect(span.get_tag('error.stack')).to_not be nil
+        end
+      end
+    end
+
+    context 'that raises a known NotFound exception' do
+      before { get '/' }
+
+      let(:rails_middleware) { [middleware] }
+      let(:middleware) do
+        stub_const(
+          'RaiseNotFoundMiddleware',
+          Class.new do
+            def initialize(app)
+              @app = app
+            end
+
+            def call(env)
+              @app.call(env)
+              raise ActionController::RoutingError, '/missing_route'
+            end
+          end
+        )
+      end
+
+      it do
+        expect(app).to have_kind_of_middleware(middleware)
+        expect(last_response).to be_not_found
+        expect(spans).to have_at_least(2).items
+      end
+
+      context 'rack span' do
+        subject(:span) { spans.find { |s| s.name == 'rack.request' } }
+
+        it do
+          expect(trace.resource).to eq('TestController#index')
+
+          expect(span.name).to eq('rack.request')
+          expect(span.span_type).to eq('web')
+          expect(span.resource).to eq('TestController#index')
+          expect(span.get_tag('http.url')).to eq('/')
+          expect(span.get_tag('http.method')).to eq('GET')
+          expect(span.get_tag('http.status_code')).to eq('404')
+
+          expect(span.get_tag('error.type')).to be nil
+          expect(span.get_tag('error.message')).to be nil
+          expect(span).to_not have_error
+          expect(span.get_tag('error.stack')).to be nil
+        end
+      end
+    end
+
+    context 'that raises a custom exception' do
+      before { get '/' }
+
+      let(:rails_middleware) { [middleware] }
+      let(:error_class) do
+        stub_const(
+          'CustomError',
+          Class.new(StandardError) do
+            def message
+              'Custom error message!'
+            end
+          end
+        )
+      end
+
+      let(:middleware) do
+        # Run this to define the error class
+        error_class
+
+        stub_const(
+          'RaiseCustomErrorMiddleware',
+          Class.new do
+            def initialize(app)
+              @app = app
+            end
+
+            def call(env)
+              @app.call(env)
+              raise CustomError
+            end
+          end
+        )
+      end
+
+      it do
+        expect(app).to have_kind_of_middleware(middleware)
+        expect(last_response).to be_server_error
+        expect(spans).to have_at_least(2).items
+      end
+
+      context 'rack span' do
+        subject(:span) { spans.first }
+
+        it do
+          expect(trace.resource).to eq('TestController#index')
+
+          expect(span.name).to eq('rack.request')
+          expect(span.span_type).to eq('web')
+          expect(span.resource).to eq('TestController#index')
+
+          expect(span.get_tag('http.url')).to eq('/')
+          expect(span.get_tag('http.me
