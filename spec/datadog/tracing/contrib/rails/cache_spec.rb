@@ -147,4 +147,137 @@ RSpec.describe 'Rails cache' do
       expect(span.name).to eq('rails.cache')
       expect(span.span_type).to eq('cache')
       expect(span.resource).to eq('SET')
-      expect(span.service).to eq('ra
+      expect(span.service).to eq('rails-cache')
+      expect(span.get_tag('rails.cache.backend').to_s).to eq('file_store')
+      expect(span.get_tag('rails.cache.key')).to eq(key)
+
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_support')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('cache')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+        .to eq('rails-cache')
+    end
+
+    context 'with custom cache_service' do
+      before { Datadog.configuration.tracing[:active_support][:cache_service] = 'service-cache' }
+
+      it 'uses the proper service name' do
+        write
+        expect(span.service).to eq('service-cache')
+      end
+    end
+
+    context 'with complex cache key' do
+      let(:key) { ['custom-key', %w[x y], user] }
+      let(:user) { double('User', cache_key: 'User:3') }
+
+      it 'expands key using ActiveSupport' do
+        write
+        expect(span.get_tag('rails.cache.key')).to eq('custom-key/x/y/User:3')
+      end
+    end
+  end
+
+  describe '#write_multi' do
+    let(:values) { multi_keys.map { |k| 50 + k[-1].to_i } }
+
+    subject(:write_multi) { cache.write_multi(Hash[multi_keys.zip(values)], opt_name: :opt_value) }
+
+    context 'when the method is defined' do
+      before do
+        unless ::ActiveSupport::Cache::Store.public_method_defined?(:write_multi)
+          skip 'Test is not applicable to this Rails version'
+        end
+      end
+
+      it_behaves_like 'a no-op when instrumentation is disabled'
+
+      it_behaves_like 'measured span for integration', false do
+        before { write_multi }
+      end
+
+      it do
+        write_multi
+        expect(span.name).to eq('rails.cache')
+        expect(span.span_type).to eq('cache')
+        expect(span.resource).to eq('MSET')
+        expect(span.service).to eq('rails-cache')
+        expect(span.get_tag('rails.cache.backend').to_s).to eq('file_store')
+        expect(JSON.parse(span.get_tag('rails.cache.keys'))).to eq(multi_keys)
+
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+          .to eq('active_support')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('cache')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+          .to eq('rails-cache')
+      end
+
+      context 'with custom cache_service' do
+        before { Datadog.configuration.tracing[:active_support][:cache_service] = 'service-cache' }
+
+        it 'uses the proper service name' do
+          write_multi
+          expect(span.service).to eq('service-cache')
+        end
+      end
+
+      context 'with complex cache key' do
+        let(:key) { ['custom-key', %w[x y], user] }
+        let(:user) { double('User', cache_key: 'User:3') }
+
+        it 'expands key using ActiveSupport' do
+          cache.write_multi(key => 0)
+          expect(span.get_tag('rails.cache.keys')).to eq('["custom-key/x/y/User:3"]')
+        end
+      end
+    end
+
+    context 'when the method is not defined' do
+      before do
+        if ::ActiveSupport::Cache::Store.public_method_defined?(:write_multi)
+          skip 'Test is not applicable to this Rails version'
+        end
+      end
+
+      it do
+        expect(::ActiveSupport::Cache::Store.ancestors).not_to(
+          include(::Datadog::Tracing::Contrib::ActiveSupport::Cache::Instrumentation::WriteMulti)
+        )
+      end
+
+      it do
+        expect { subject }.to raise_error NoMethodError
+      end
+    end
+  end
+
+  describe '#delete' do
+    subject(:delete) { cache.delete(key) }
+
+    it_behaves_like 'a no-op when instrumentation is disabled'
+    it_behaves_like 'measured span for integration', false do
+      before { delete }
+    end
+
+    it do
+      delete
+      expect(span.name).to eq('rails.cache')
+      expect(span.span_type).to eq('cache')
+      expect(span.resource).to eq('DELETE')
+      expect(span.service).to eq('rails-cache')
+      expect(span.get_tag('rails.cache.backend').to_s).to eq('file_store')
+      expect(span.get_tag('rails.cache.key')).to eq(key)
+
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_support')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('cache')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+        .to eq('rails-cache')
+    end
+  end
+
+  describe '#fetch' do
+    subject(:fetch) 
