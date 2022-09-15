@@ -1005,4 +1005,77 @@ RSpec.describe 'Rack integration tests' do
               expect(span.get_tag('http.response.headers.last-modified')).to eq('Tue, 15 Nov 1994 12:45:26 GMT')
               expect(span.get_tag('http.response.headers.x-request-id')).to eq('f058ebd6-02f7-4d3f-942e-904344e8cde5')
               # Make sure non-whitelisted headers don't become tags.
-              expect(span.get_tag(
+              expect(span.get_tag('http.request.headers.x-fake-response')).to be nil
+            end
+          end
+        end
+      end
+    end
+
+    context 'with a route that mutates request method' do
+      let(:routes) do
+        proc do
+          map '/change_request_method' do
+            run(
+              proc do |env|
+                env['REQUEST_METHOD'] = 'GET'
+                [200, { 'Content-Type' => 'text/html' }, ['OK']]
+              end
+            )
+          end
+        end
+      end
+
+      it do
+        post '/change_request_method'
+
+        expect(span).to be_root_span
+        expect(span.name).to eq('rack.request')
+        expect(span.span_type).to eq('web')
+        expect(span.service).to eq(tracer.default_service)
+        expect(span.resource).to eq('POST 200')
+        expect(span.get_tag('http.method')).to eq('POST')
+        expect(span.get_tag('http.status_code')).to eq('200')
+        expect(span.status).to eq(0)
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('rack')
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('request')
+        expect(span.get_tag('span.kind')).to eq('server')
+      end
+    end
+  end
+
+  context 'for a nested instrumentation' do
+    let(:another) do
+      Rack::Builder.new do
+        use Datadog::Tracing::Contrib::Rack::TraceMiddleware
+
+        map '/success' do
+          run(proc { |_env| [200, { 'Content-Type' => 'text/html' }, ['OK']] })
+        end
+      end.to_app
+    end
+
+    let(:app) do
+      nested_app = another
+
+      Rack::Builder.new do
+        use Datadog::Tracing::Contrib::Rack::TraceMiddleware
+
+        map '/nested' do
+          use Datadog::Tracing::Contrib::Rack::TraceMiddleware
+
+          run nested_app
+        end
+      end.to_app
+    end
+
+    subject(:response) { get 'nested/success' }
+
+    before do
+      is_expected.to be_ok
+      expect(spans).to have(1).items
+    end
+
+    it_behaves_like 'a rack GET 200 span'
+  end
+end
