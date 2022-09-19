@@ -261,4 +261,61 @@ RSpec.describe 'Rails middleware' do
           expect(span.resource).to eq('TestController#index')
 
           expect(span.get_tag('http.url')).to eq('/')
-          expect(span.get_tag('http.me
+          expect(span.get_tag('http.method')).to eq('GET')
+          expect(span.get_tag('http.status_code')).to eq('500')
+          expect(span.get_tag('error.type')).to eq('CustomError')
+          expect(span.get_tag('error.message')).to eq('Custom error message!')
+          expect(span).to have_error
+          expect(span.get_tag('error.stack')).to_not be nil
+        end
+      end
+
+      context 'that is flagged as a custom 404' do
+        # TODO: Make a cleaner API for injecting into Rails application configuration
+        let(:initialize_block) do
+          super_block = super()
+          proc do
+            instance_exec(&super_block)
+            config.action_dispatch.rescue_responses.merge!(
+              'CustomError' => :not_found
+            )
+          end
+        end
+
+        after do
+          # Be sure to delete configuration after, so it doesn't carry over to other examples.
+          # TODO: Clear this configuration automatically via rails_helper shared examples
+          ActionDispatch::Railtie.config.action_dispatch.rescue_responses.delete('CustomError')
+          ActionDispatch::ExceptionWrapper.class_variable_get(:@@rescue_responses).tap do |resps|
+            resps.delete('CustomError')
+          end
+        end
+
+        it do
+          expect(app).to have_kind_of_middleware(middleware)
+          expect(last_response).to be_not_found
+          expect(spans).to have_at_least(2).items
+        end
+
+        context 'rack span' do
+          subject(:span) { spans.first }
+
+          it do
+            expect(trace.resource).to eq('TestController#index')
+
+            expect(span.name).to eq('rack.request')
+            expect(span.span_type).to eq('web')
+            expect(span.resource).to eq('TestController#index')
+            expect(span.get_tag('http.url')).to eq('/')
+            expect(span.get_tag('http.method')).to eq('GET')
+            expect(span.get_tag('http.status_code')).to eq('404')
+            expect(span.get_tag('error.type')).to be nil
+            expect(span.get_tag('error.message')).to be nil
+            expect(span).to_not have_error
+            expect(span.get_tag('error.stack')).to be nil
+          end
+        end
+      end
+    end
+  end
+end
