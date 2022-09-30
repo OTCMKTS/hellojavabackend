@@ -248,4 +248,55 @@ RSpec.describe 'ActiveJob' do
         expect(span.get_tag('sidekiq.job.id')).to match(/[0-9a-f]{24}/)
         expect(span.get_tag('sidekiq.job.retry')).to eq('true')
         expect(span.get_tag('sidekiq.job.queue')).to eq('default')
-        e
+        expect(span.get_tag('span.kind')).to eq('consumer')
+        expect(span.get_tag('messaging.system')).to eq('sidekiq')
+      end
+    end
+
+    context 'with an ActiveJob' do
+      subject(:worker) do
+        stub_const(
+          'EmptyJob',
+          Class.new(ActiveJob::Base) do
+            def perform; end
+          end
+        )
+      end
+
+      it 'has correct Sidekiq span' do
+        worker.perform_later
+
+        # depending on test order, the active_job integration may already have been enabled
+        # which means there may be multiple spans. Find the sidekiq one:
+        span = spans.find { |s| s.name == 'sidekiq.job' }
+
+        expect(span.name).to eq('sidekiq.job')
+        expect(span.resource).to eq('EmptyJob')
+        expect(span.get_tag('sidekiq.job.wrapper')).to eq('ActiveJob::QueueAdapters::SidekiqAdapter::JobWrapper')
+        expect(span.get_tag('sidekiq.job.id')).to match(/[0-9a-f]{24}/)
+        expect(span.get_tag('sidekiq.job.retry')).to eq('true')
+        expect(span.get_tag('sidekiq.job.queue')).to eq('default')
+        expect(span.get_tag('span.kind')).to eq('consumer')
+        expect(span.get_tag('messaging.system')).to eq('sidekiq')
+      end
+
+      context 'when active_job tracing is also enabled' do
+        before do
+          Datadog.configure do |c|
+            c.tracing.instrument :active_job
+          end
+        end
+
+        it 'records both active_job and sidekiq' do
+          worker.perform_later
+
+          sidekiq_span = spans.find { |s| s.name == 'sidekiq.job' }
+          active_job_span = spans.find { |s| s.name == 'active_job.perform' }
+
+          expect(sidekiq_span).to be_present
+          expect(active_job_span).to be_present
+        end
+      end
+    end
+  end
+end
