@@ -141,4 +141,111 @@ RSpec.describe 'ActiveJob' do
       expect(enqueue_retry_span.resource).to eq('ExampleJob')
       expect(enqueue_retry_span.get_tag('active_job.adapter')).to eq('ActiveJob::QueueAdapters::InlineAdapter')
       expect(enqueue_retry_span.get_tag('active_job.job.id')).to match(/[0-9a-f\-]{32}/)
-      expect(enqueue_retry_span.get
+      expect(enqueue_retry_span.get_tag('active_job.job.queue')).to eq('elephants')
+      expect(enqueue_retry_span.get_tag('active_job.job.error')).to eq('JobRetryError')
+      expect(enqueue_retry_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_job')
+      expect(enqueue_retry_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('enqueue_retry')
+
+      # Rails 6 introduced "jitter" so the wait will not be exactly the set(wait: 2) value
+      expect(enqueue_retry_span.get_tag('active_job.job.retry_wait')).to be_within(1).of(2)
+
+      if Datadog::Tracing::Contrib::ActiveJob::Integration.version >= Gem::Version.new('5.0')
+        expect(enqueue_retry_span.get_tag('active_job.job.priority')).to eq(-10)
+      end
+
+      retry_stopped_span = spans.find { |s| s.name == 'active_job.retry_stopped' }
+      expect(retry_stopped_span.name).to eq('active_job.retry_stopped')
+      expect(retry_stopped_span.resource).to eq('ExampleJob')
+      expect(retry_stopped_span.get_tag('active_job.adapter')).to eq('ActiveJob::QueueAdapters::InlineAdapter')
+      expect(retry_stopped_span.get_tag('active_job.job.id')).to match(/[0-9a-f\-]{32}/)
+      expect(retry_stopped_span.get_tag('active_job.job.queue')).to eq('elephants')
+      expect(retry_stopped_span.get_tag('active_job.job.error')).to eq('JobRetryError')
+      expect(retry_stopped_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_job')
+      expect(retry_stopped_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('retry_stopped')
+
+      if Datadog::Tracing::Contrib::ActiveJob::Integration.version >= Gem::Version.new('5.0')
+        expect(retry_stopped_span.get_tag('active_job.job.priority')).to eq(-10)
+      end
+    end
+
+    it 'instruments discard' do
+      unless Datadog::Tracing::Contrib::ActiveJob::Integration.version >= Gem::Version.new('6.0')
+        skip('ActiveSupport instrumentation for Discard introduced in Rails 6')
+      end
+
+      job_class.set(queue: :elephants, priority: -10).perform_later(test_discard: true)
+
+      span = spans.find { |s| s.name == 'active_job.discard' }
+      expect(span.name).to eq('active_job.discard')
+      expect(span.resource).to eq('ExampleJob')
+      expect(span.get_tag('active_job.adapter')).to eq('ActiveJob::QueueAdapters::InlineAdapter')
+      expect(span.get_tag('active_job.job.id')).to match(/[0-9a-f\-]{32}/)
+      expect(span.get_tag('active_job.job.queue')).to eq('elephants')
+      expect(span.get_tag('active_job.job.error')).to eq('JobDiscardError')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_job')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('discard')
+
+      if Datadog::Tracing::Contrib::ActiveJob::Integration.version >= Gem::Version.new('5.0')
+        expect(span.get_tag('active_job.job.priority')).to eq(-10)
+      end
+    end
+
+    it 'injects active correlation into logs' do
+      job_class.set(queue: :elephants, priority: -10).perform_later
+
+      logs = log_output.string
+      span = spans.find { |s| s.name == 'active_job.perform' }
+
+      expect(logs).to include(span.trace_id.to_s)
+      expect(logs).to include('MINASWAN')
+    end
+  end
+
+  context 'with Sidekiq instrumentation' do
+    before do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:[]).with('USE_SIDEKIQ').and_return('true')
+    end
+
+    before do
+      Sidekiq.configure_client do |config|
+        config.redis = { url: ENV['REDIS_URL'] }
+      end
+
+      Sidekiq.configure_server do |config|
+        config.redis = { url: ENV['REDIS_URL'] }
+      end
+
+      Sidekiq::Testing.inline!
+    end
+
+    before { app }
+
+    context 'with a Sidekiq::Worker' do
+      subject(:worker) do
+        stub_const(
+          'EmptyWorker',
+          Class.new do
+            include Sidekiq::Worker
+
+            def perform; end
+          end
+        )
+      end
+
+      it 'has correct Sidekiq span' do
+        worker.perform_async
+
+        expect(span.name).to eq('sidekiq.job')
+        expect(span.resource).to eq('EmptyWorker')
+        expect(span.get_tag('sidekiq.job.wrapper')).to be_nil
+        expect(span.get_tag('sidekiq.job.id')).to match(/[0-9a-f]{24}/)
+        expect(span.get_tag('sidekiq.job.retry')).to eq('true')
+        expect(span.get_tag('sidekiq.job.queue')).to eq('default')
+        e
