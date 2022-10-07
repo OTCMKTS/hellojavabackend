@@ -67,4 +67,24 @@ RSpec.describe 'Rails Railtie' do
   describe 'when load hooks run twice' do
     subject! do
       # Set expectations
-      expect(Datadog::Tracin
+      expect(Datadog::Tracing::Contrib::Rails::Patcher).to receive(:add_middleware)
+        .with(a_kind_of(Rails::Application))
+        .once
+        .and_call_original
+
+      without_warnings do
+        # Then load the app, which run load hooks
+        app
+
+        # Then manually re-run load hooks
+        ActiveSupport.run_load_hooks(:before_initialize, app)
+        ActiveSupport.run_load_hooks(:after_initialize, app)
+      end
+    end
+
+    it 'only includes the middleware once' do
+      expect(app).to have_kind_of_middleware(Datadog::Tracing::Contrib::Rack::TraceMiddleware).once
+      expect(app).to have_kind_of_middleware(Datadog::Tracing::Contrib::Rails::ExceptionMiddleware).once
+    end
+  end
+end
