@@ -108,4 +108,131 @@ MESSAGE
   end
 
   describe '#fetch' do
-    it_behaves_like '
+    it_behaves_like 'reader method', :fetch
+
+    context 'with block' do
+      subject(:fetch) { cache.fetch(key) { 51 } }
+
+      it 'retrieves and stores default value' do
+        expect(fetch).to eq(51)
+
+        expect(spans).to have(4).items
+
+        cache_get, cache_set, redis_get, redis_set = spans
+
+        expect(cache_set.name).to eq('rails.cache')
+        expect(cache_set.resource).to eq('SET')
+        expect(redis_set.name).to eq('redis.command')
+        expect(cache_get.name).to eq('rails.cache')
+        expect(cache_get.resource).to eq('GET')
+        expect(redis_get.name).to eq('redis.command')
+
+        expect(cache_get.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+          .to eq('active_support')
+        expect(cache_get.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('cache')
+        expect(cache_get.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+          .to eq('active_support-cache')
+
+        expect(cache_set.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+          .to eq('active_support')
+        expect(cache_set.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('cache')
+        expect(cache_set.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+          .to eq('active_support-cache')
+
+        # check that the value is really updated, and persistent
+        expect(cache.read(key)).to eq(51)
+        clear_traces!
+
+        # if value exists, fetch returns it and does no update
+        expect(cache.fetch(key) { 7 }).to eq(51)
+
+        expect(spans).to have(2).items
+
+        cache, redis = spans
+        expect(cache.name).to eq('rails.cache')
+        expect(redis.name).to eq('redis.command')
+
+        expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+          .to eq('active_support')
+        expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('cache')
+        expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+          .to eq('active_support-cache')
+      end
+    end
+  end
+
+  describe '#write' do
+    subject!(:write) { cache.write(key, 50) }
+
+    it do
+      expect(spans).to have(2).items
+      cache, redis = spans
+
+      expect(cache.get_tag('rails.cache.backend')).to eq(cache_store_name)
+
+      expect(redis.name).to eq('redis.command')
+      expect(redis.span_type).to eq('redis')
+      expect(redis.resource).to match(/SET custom-key .*ActiveSupport.*/)
+      expect(redis.get_tag('redis.raw_command')).to match(/SET custom-key .*ActiveSupport.*/)
+      expect(redis.service).to eq('redis')
+      # the following ensures span will be correctly displayed (parent/child of the same trace)
+      expect(cache.trace_id).to eq(redis.trace_id)
+      expect(cache.span_id).to eq(redis.parent_id)
+
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_support')
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('cache')
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+        .to eq('active_support-cache')
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:span) { spans.last }
+    end
+  end
+
+  describe '#delete' do
+    subject!(:write) { cache.delete(key) }
+
+    it do
+      expect(spans).to have(2).items
+      cache, del = spans
+
+      expect(cache.get_tag('rails.cache.backend')).to eq(cache_store_name)
+
+      expect(del.name).to eq('redis.command')
+      expect(del.span_type).to eq('redis')
+      expect(del.resource).to eq('DEL custom-key')
+      expect(del.get_tag('redis.raw_command')).to eq('DEL custom-key')
+      expect(del.service).to eq('redis')
+      # the following ensures span will be correctly displayed (parent/child of the same trace)
+      expect(cache.trace_id).to eq(del.trace_id)
+      expect(cache.span_id).to eq(del.parent_id)
+
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT))
+        .to eq('active_support')
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('cache')
+      expect(cache.get_tag(Datadog::Tracing::Metadata::Ext::TAG_PEER_SERVICE))
+        .to eq('active_support-cache')
+    end
+
+    it_behaves_like 'a peer service span' do
+      let(:span) { spans.last }
+    end
+  end
+
+  private
+
+  def client_from_driver(driver)
+    if Gem::Version.new(::Redis::VERSION) >= Gem::Version.new('4.0.0')
+      driver._client
+    else
+      driver.client
+    end
+  end
+end
