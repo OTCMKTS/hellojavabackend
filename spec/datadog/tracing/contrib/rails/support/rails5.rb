@@ -11,7 +11,7 @@ require 'datadog/tracing/contrib/rails/support/controllers'
 require 'datadog/tracing/contrib/rails/support/middleware'
 require 'datadog/tracing/contrib/rails/support/models'
 
-RSpec.shared_context 'Rails 4 base application' do
+RSpec.shared_context 'Rails 5 base application' do
   include_context 'Rails controllers'
   include_context 'Rails middleware'
   include_context 'Rails models'
@@ -23,19 +23,22 @@ RSpec.shared_context 'Rails 4 base application' do
         raise parsed.to_yaml # Replace this line to add custom connections to the hash from database.yml
       end
     end
-
     during_init = initialize_block
 
     klass.send(:define_method, :initialize) do |*args|
       super(*args)
-      redis_cache = [:redis_store, { url: ENV['REDIS_URL'] }]
+      redis_cache =
+        if Gem.loaded_specs['redis-activesupport']
+          [:redis_store, { url: ENV['REDIS_URL'] }]
+        else
+          [:redis_cache_store, { url: ENV['REDIS_URL'] }]
+        end
       file_cache = [:file_store, '/tmp/ddtrace-rb/cache/']
 
       config.secret_key_base = 'f624861242e4ccf20eacb6bb48a886da'
       config.cache_store = ENV['REDIS_URL'] ? redis_cache : file_cache
       config.eager_load = false
       config.consider_all_requests_local = true
-      config.active_support.test_order = :random
 
       instance_eval(&during_init)
 
@@ -83,26 +86,9 @@ RSpec.shared_context 'Rails 4 base application' do
   def append_routes!
     # Make sure to load controllers first
     # otherwise routes won't draw properly.
-    delegate = method(:draw_test_routes!)
-
-    # Then set the routes
-    rails_test_application.instance.routes.append do
-      delegate.call(self)
-    end
-  end
-
-  def append_controllers!
-    controllers
-  end
-
-  def draw_test_routes!(mapper)
-    # Rails 4 accumulates these route drawing
-    # blocks errantly, and this prevents them from
-    # drawing more than once.
-    return if @drawn
-
     test_routes = routes
-    mapper.instance_exec do
+
+    rails_test_application.instance.routes.append do
       test_routes.each do |k, v|
         if k.is_a?(Array)
           send(k.first, k.last => v)
@@ -111,12 +97,18 @@ RSpec.shared_context 'Rails 4 base application' do
         end
       end
     end
-    @drawn = true
   end
 
-  # Rails 4 leaves a bunch of global class configuration on Rails::Railtie::Configuration in class variables
+  def append_controllers!
+    controllers
+  end
+
+  # Rails 5 leaves a bunch of global class configuration on Rails::Railtie::Configuration in class variables
   # We need to reset these so they don't carry over between example runs
   def reset_rails_configuration!
+    # Reset autoloaded constants
+    ActiveSupport::Dependencies.clear if Rails.application
+
     Lograge.remove_existing_log_subscriptions if defined?(::Lograge)
 
     Rails::Railtie::Configuration.class_variable_set(:@@eager_load_namespaces, nil)
@@ -126,6 +118,4 @@ RSpec.shared_context 'Rails 4 base application' do
       Rails::Railtie::Configuration.class_variable_set(:@@app_middleware, Rails::Configuration::MiddlewareStackProxy.new)
     end
     Rails::Railtie::Configuration.class_variable_set(:@@app_generators, nil)
-    Rails::Railtie::Configuration.class_variable_set(:@@to_prepare_blocks, nil)
-  end
-end
+    Rails::Railtie::Configura
