@@ -1,3 +1,4 @@
+
 require 'rails/all'
 
 require 'ddtrace' if ENV['TEST_AUTO_INSTRUMENT'] == true
@@ -11,7 +12,7 @@ require 'datadog/tracing/contrib/rails/support/controllers'
 require 'datadog/tracing/contrib/rails/support/middleware'
 require 'datadog/tracing/contrib/rails/support/models'
 
-RSpec.shared_context 'Rails 5 base application' do
+RSpec.shared_context 'Rails 6 base application' do
   include_context 'Rails controllers'
   include_context 'Rails middleware'
   include_context 'Rails models'
@@ -35,10 +36,13 @@ RSpec.shared_context 'Rails 5 base application' do
         end
       file_cache = [:file_store, '/tmp/ddtrace-rb/cache/']
 
+      config.load_defaults '6.0'
       config.secret_key_base = 'f624861242e4ccf20eacb6bb48a886da'
+      config.active_record.cache_versioning = false if Gem.loaded_specs['redis-activesupport']
       config.cache_store = ENV['REDIS_URL'] ? redis_cache : file_cache
       config.eager_load = false
       config.consider_all_requests_local = true
+      config.hosts.clear # Allow requests for any hostname during tests
 
       instance_eval(&during_init)
 
@@ -76,6 +80,27 @@ RSpec.shared_context 'Rails 5 base application' do
                                                             :inline
                                                           end
 
+      Rails.application.config.file_watcher = Class.new(ActiveSupport::FileUpdateChecker) do
+        # When running in full application mode, Rails tries to monitor
+        # the file system for changes. This causes issues when using
+        # {ActionView::FixtureResolver} to mock the filesystem for templates
+        # as this test resolver wasn't meant to work with a full application.
+        #
+        # Because {ActionView::FixtureResolver} doesn't have a complete filesystem,
+        # it sets its base path to '', which later in the file watcher gets translated to:
+        # "Monitor '**/*' for changes", which means monitoring the whole system, causing
+        # many "permission denied errors".
+        #
+        # This method removes the blank path ('') created by {ActionView::FixtureResolver}
+        # in order to allow the file watcher to skip monitoring the "filesystem changes"
+        # of the in-memory fixtures.
+        def initialize(files, dirs = {}, &block)
+          dirs = dirs.delete('') if dirs.include?('')
+
+          super(files, dirs, &block)
+        end
+      end
+
       before_test_init.call
       initialize!
       after_test_init.call
@@ -97,6 +122,12 @@ RSpec.shared_context 'Rails 5 base application' do
         end
       end
     end
+
+    # ActionText requires ApplicationController to be loaded since Rails 6
+    example = self
+    ActiveSupport.on_load(:action_text_content) do
+      example.stub_const('ApplicationController', Class.new(ActionController::Base))
+    end
   end
 
   def append_controllers!
@@ -111,6 +142,17 @@ RSpec.shared_context 'Rails 5 base application' do
 
     Lograge.remove_existing_log_subscriptions if defined?(::Lograge)
 
+    reset_class_variable(ActiveRecord::Railtie::Configuration, :@@options)
+
+    # After `deep_dup`, the sentinel `NULL_OPTION` is inadvertently changed. We restore it here.
+    if Rails::VERSION::MINOR < 1
+      ActiveRecord::Railtie.config.action_view.finalize_compiled_template_methods = ActionView::Railtie::NULL_OPTION
+    end
+
+    reset_class_variable(ActiveSupport::Dependencies, :@@autoload_paths)
+    reset_class_variable(ActiveSupport::Dependencies, :@@autoload_once_paths)
+    reset_class_variable(ActiveSupport::Dependencies, :@@_eager_load_paths)
+
     Rails::Railtie::Configuration.class_variable_set(:@@eager_load_namespaces, nil)
     Rails::Railtie::Configuration.class_variable_set(:@@watchable_files, nil)
     Rails::Railtie::Configuration.class_variable_set(:@@watchable_dirs, nil)
@@ -119,5 +161,16 @@ RSpec.shared_context 'Rails 5 base application' do
     end
     Rails::Railtie::Configuration.class_variable_set(:@@app_generators, nil)
     Rails::Railtie::Configuration.class_variable_set(:@@to_prepare_blocks, nil)
+  end
+
+  # Resets configuration that needs to be restored to its original value
+  # between each run of a Rails application.
+  def reset_class_variable(clazz, variable)
+    value = Datadog::Tracing::Contrib::Rails::Test::Configuration.fetch(
+      "#{clazz}.#{variable}",
+      clazz.class_variable_get(variable)
+    )
+
+    clazz.class_variable_set(variable, value.deep_dup)
   end
 end
