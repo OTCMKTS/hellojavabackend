@@ -98,4 +98,118 @@ RSpec.describe Datadog::Tracing::Contrib::Rake::Instrumentation do
         end
       end
 
-      describe '
+      describe '\'rake.execute\' span' do
+        it do
+          expect(execute_span.name).to eq(Datadog::Tracing::Contrib::Rake::Ext::SPAN_EXECUTE)
+          expect(execute_span.resource).to eq(task_name.to_s)
+          expect(execute_span.parent_id).to eq(invoke_span.span_id)
+          expect(execute_span.service).to eq(tracer.default_service)
+          expect(execute_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('rake')
+          expect(execute_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+            .to eq('execute')
+          expect(execute_span.get_tag(Datadog::Tracing::Metadata::Ext::Analytics::TAG_SAMPLE_RATE))
+            .to be nil
+        end
+      end
+    end
+
+    shared_examples 'a successful single task execution' do
+      before do
+        expect(spy).to receive(:call) do |invocation_task, invocation_args|
+          expect(invocation_task).to eq(task)
+          expect(invocation_args.to_hash).to eq(args_hash)
+        end
+        expect(task).to receive(:shutdown_tracer!).with(no_args).twice.and_call_original
+        invoke
+      end
+
+      it_behaves_like 'a single task execution' do
+        describe '\'rake.invoke\' span' do
+          it "has no error'" do
+            expect(invoke_span).to_not have_error
+          end
+        end
+
+        describe '\'rake.execute\' span' do
+          it "has no error'" do
+            expect(execute_span).to_not have_error
+          end
+        end
+      end
+    end
+
+    shared_examples 'a failed single task execution' do
+      before do
+        expect(spy).to(receive(:call)) { raise error_class, 'oops' }
+        expect(task).to receive(:shutdown_tracer!).with(no_args).twice.and_call_original
+        expect { task.invoke(*args) }.to raise_error('oops')
+      end
+
+      let(:error_class) { Class.new(StandardError) }
+
+      it_behaves_like 'a single task execution' do
+        describe '\'rake.invoke\' span' do
+          it 'has error' do
+            expect(invoke_span).to have_error
+            expect(invoke_span).to have_error_message('oops')
+            expect(invoke_span).to have_error_type(error_class.to_s)
+            expect(invoke_span).to have_error_stack
+          end
+        end
+
+        describe '\'rake.execute\' span' do
+          it 'has error' do
+            expect(execute_span).to have_error
+            expect(execute_span).to have_error_message('oops')
+            expect(execute_span).to have_error_type(error_class.to_s)
+            expect(execute_span).to have_error_stack
+          end
+        end
+      end
+    end
+
+    context 'for a task' do
+      let(:args_hash) { {} }
+      let(:task_arg_names) { args_hash.keys }
+      let(:args) { args_hash.values }
+
+      let(:define_task!) do
+        reset_task!(task_name)
+        Rake::Task.define_task(task_name, *task_arg_names, &task_body)
+      end
+
+      before { define_task! }
+
+      it 'returns task return value' do
+        allow(spy).to receive(:call)
+        expect(invoke).to contain_exactly(task_body)
+      end
+
+      context 'without args' do
+        it_behaves_like 'a successful single task execution' do
+          describe '\'rake.invoke\' span tags' do
+            it do
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to eq([].to_s)
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_INVOKE_ARGS))
+                .to eq(['?'].to_s)
+            end
+          end
+
+          describe '\'rake.execute\' span tags' do
+            it do
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to be nil
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_EXECUTE_ARGS))
+                .to eq({}.to_s)
+            end
+          end
+        end
+
+        it_behaves_like 'a failed single task execution' do
+          describe '\'rake.invoke\' span tags' do
+            it do
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to eq([].to_s)
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_INVOKE_ARGS))
+                .to eq(['?'].to
