@@ -212,4 +212,112 @@ RSpec.describe Datadog::Tracing::Contrib::Rake::Instrumentation do
               expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
                 .to eq([].to_s)
               expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_INVOKE_ARGS))
-                .to eq(['?'].to
+                .to eq(['?'].to_s)
+            end
+          end
+
+          describe '\'rake.execute\' span tags' do
+            it do
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to be nil
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_EXECUTE_ARGS))
+                .to eq({}.to_s)
+            end
+          end
+        end
+      end
+
+      context 'with args' do
+        let(:args_hash) { { one: 1, two: 2, three: 3 } }
+
+        it_behaves_like 'a successful single task execution' do
+          describe '\'rake.invoke\' span tags' do
+            it do
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to eq([:one, :two, :three].to_s)
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_INVOKE_ARGS))
+                .to eq(['?'].to_s)
+            end
+          end
+
+          describe '\'rake.execute\' span tags' do
+            it do
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to be nil
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_EXECUTE_ARGS))
+                .to eq({ one: '?', two: '?', three: '?' }.to_s)
+            end
+          end
+        end
+        it_behaves_like 'a failed single task execution' do
+          describe '\'rake.invoke\' span tags' do
+            it do
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to eq([:one, :two, :three].to_s)
+              expect(invoke_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_INVOKE_ARGS))
+                .to eq(['?'].to_s)
+            end
+          end
+
+          describe '\'rake.execute\' span tags' do
+            it do
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_TASK_ARG_NAMES))
+                .to be nil
+              expect(execute_span.get_tag(Datadog::Tracing::Contrib::Rake::Ext::TAG_EXECUTE_ARGS))
+                .to eq({ one: '?', two: '?', three: '?' }.to_s)
+            end
+          end
+        end
+      end
+
+      context 'with a prerequisite task' do
+        let(:prerequisite_task_name) { :test_rake_instrumentation_prerequisite }
+        let(:instrumented_task_names) { [task_name, prerequisite_task_name] }
+        let(:prerequisite_task_execute_span) do
+          spans.find do |s|
+            s.name == Datadog::Tracing::Contrib::Rake::Ext::SPAN_EXECUTE \
+            && s.resource == prerequisite_task_name.to_s
+          end
+        end
+        let(:execute_span) do
+          spans.find do |s|
+            s.name == Datadog::Tracing::Contrib::Rake::Ext::SPAN_EXECUTE \
+            && s.resource == task_name.to_s
+          end
+        end
+        let(:invoke_span) { spans.find { |s| s.name == Datadog::Tracing::Contrib::Rake::Ext::SPAN_INVOKE } }
+        let(:task_execute_span) do
+          spans.find do |s|
+            s.name == Datadog::Tracing::Contrib::Rake::Ext::SPAN_EXECUTE \
+            && s.resource == task_name.to_s
+          end
+        end
+        let(:prerequisite_task_body) { proc { |task, args| prerequisite_spy.call(task, args) } }
+        let(:prerequisite_spy) { double('prerequisite spy') }
+        let(:prerequisite_task) { Rake::Task[prerequisite_task_name] }
+
+        let(:define_task!) do
+          reset_task!(task_name)
+          reset_task!(prerequisite_task_name)
+          Rake::Task.define_task(prerequisite_task_name, &prerequisite_task_body)
+          Rake::Task.define_task(task_name => prerequisite_task_name, &task_body)
+        end
+
+        before do
+          expect(prerequisite_spy).to receive(:call) do |invocation_task, invocation_args|
+            expect(invocation_task).to eq(prerequisite_task)
+            expect(invocation_args.to_hash).to eq({})
+          end.ordered
+
+          expect(spy).to receive(:call) do |invocation_task, invocation_args|
+            expect(invocation_task).to eq(task)
+            expect(invocation_args.to_hash).to eq(args_hash)
+          end.ordered
+
+          expect(task).to receive(:shutdown_tracer!).with(no_args).twice.and_call_original
+          expect(prerequisite_task).to receive(:shutdown_tracer!).with(no_args).once.and_call_original
+
+          invoke
+        end
+
+    
