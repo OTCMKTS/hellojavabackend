@@ -421,4 +421,11 @@ RSpec.describe Datadog::Tracing::Contrib::Rake::Instrumentation do
           expect(invoke).to contain_exactly(task_body)
         end
 
-        it 'runs the task without tracing' 
+        it 'runs the task without tracing' do
+          expect { invoke }.to_not raise_error
+          expect(spans.length).to eq(0)
+        end
+      end
+    end
+  end
+end
