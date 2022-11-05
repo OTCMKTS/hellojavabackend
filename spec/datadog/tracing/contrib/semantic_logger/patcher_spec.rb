@@ -8,4 +8,7 @@ RSpec.describe Datadog::Tracing::Contrib::SemanticLogger::Patcher do
     it 'adds Instrumentation to ancestors of SemanticLogger::Logger class' do
       described_class.patch
 
-      expect(SemanticLogger::Logger.ancestors).to include(Datadog::Tr
+      expect(SemanticLogger::Logger.ancestors).to include(Datadog::Tracing::Contrib::SemanticLogger::Instrumentation)
+    end
+  end
+end
