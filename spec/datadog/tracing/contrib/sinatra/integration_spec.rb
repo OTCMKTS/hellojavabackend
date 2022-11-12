@@ -65,4 +65,14 @@ RSpec.describe Datadog::Tracing::Contrib::Sinatra::Integration do
   end
 
   describe '#default_configuration' do
-    subject(:default_configuration) { integration.def
+    subject(:default_configuration) { integration.default_configuration }
+
+    it { is_expected.to be_a_kind_of(Datadog::Tracing::Contrib::Sinatra::Configuration::Settings) }
+  end
+
+  describe '#patcher' do
+    subject(:patcher) { integration.patcher }
+
+    it { is_expected.to be Datadog::Tracing::Contrib::Sinatra::Patcher }
+  end
+end
