@@ -37,4 +37,17 @@ RSpec.describe 'Server internal tracer' do
   end
 
   it 'traces the looping scheduled wait' do
- 
+    expect_in_sidekiq_server(wait_until: -> { fetch_spans.any? { |s| s.name == 'sidekiq.scheduled_poller_wait' } }) do
+      span = spans.find { |s| s.name == 'sidekiq.scheduled_poller_wait' }
+
+      expect(span.service).to eq(tracer.default_service)
+      expect(span.name).to eq('sidekiq.scheduled_poller_wait')
+      expect(span.span_type).to eq('worker')
+      expect(span.resource).to eq('sidekiq.scheduled_poller_wait')
+      expect(span).to_not have_error
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sidekiq')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('scheduled_poller_wait')
+      expect(span.get_tag('messaging.system')).to eq('sidekiq')
+    end
+  end
+end
