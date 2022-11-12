@@ -135,4 +135,100 @@ RSpec.describe 'Sinatra instrumentation' do
               expect(response).to be_ok
 
               expect(span.resource).to eq('GET /wildcard/*')
-              e
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_URL)).to eq('/wildcard/1/2/3')
+              # expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_ROUTE_PATH)).to eq('/wildcard/*')
+            end
+          end
+        end
+
+        context 'and a request to a template route is made' do
+          subject(:response) { get '/erb' }
+
+          let(:root_span) { spans.find { |s| request_span.parent_id == s.span_id } }
+          let(:request_span) { spans.find { |s| route_span.parent_id == s.span_id } }
+          let(:route_span) { spans.find { |s| template_parent_span.parent_id == s.span_id } }
+          let(:template_parent_span) { spans.find { |s| template_child_span.parent_id == s.span_id } }
+          let(:template_child_span) { spans.find { |s| s.get_tag('sinatra.template_name') == 'layout' } }
+
+          before do
+            expect(response).to be_ok
+          end
+
+          describe 'the sinatra.request span' do
+            subject(:span) { request_span }
+
+            it do
+              expect(span.resource).to eq('GET /erb')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_URL)).to eq('/erb')
+            end
+
+            it_behaves_like 'measured span for integration', true
+          end
+
+          describe 'the sinatra.render_template child span' do
+            subject(:span) { template_parent_span }
+
+            it do
+              expect(span.name).to eq(Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_RENDER_TEMPLATE)
+              expect(span.resource).to eq('sinatra.render_template')
+              expect(span.get_tag('sinatra.template_name')).to eq('msg')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('render_template')
+            end
+
+            it_behaves_like 'measured span for integration', true
+          end
+
+          describe 'the sinatra.render_template grandchild span' do
+            subject(:span) { template_child_span }
+
+            it do
+              expect(span.name).to eq(Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_RENDER_TEMPLATE)
+              expect(span.resource).to eq('sinatra.render_template')
+              expect(span.get_tag('sinatra.template_name')).to eq('layout')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('render_template')
+            end
+
+            it_behaves_like 'measured span for integration', true
+          end
+        end
+
+        context 'and a request to a literal template route is made' do
+          subject(:response) { get '/erb_literal' }
+
+          let(:rack_span) { spans.find { |x| x.name == Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST } }
+          let(:template_parent_span) { spans.find { |s| template_child_span.parent_id == s.span_id } }
+          let(:template_child_span) { spans.find { |s| s.get_tag('sinatra.template_name') == 'layout' } }
+
+          before do
+            expect(response).to be_ok
+            expect(spans).to have(5).items
+          end
+
+          describe 'the sinatra.request span' do
+            it do
+              expect(span.resource).to eq('GET /erb_literal')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_URL)).to eq('/erb_literal')
+              expect(span.parent_id).to eq(rack_span.span_id)
+            end
+
+            it_behaves_like 'measured span for integration', true
+          end
+
+          describe 'the sinatra.render_template child span' do
+            subject(:span) { template_parent_span }
+
+            it do
+              expect(span.name).to eq(Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_RENDER_TEMPLATE)
+              expect(span.resource).to eq('sinatra.render_template')
+              expect(span.get_tag('sinatra.template_name')).to be nil
+              expect(span.parent_id).to eq(route_span.span_id)
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('render_template')
+            end
+
+            it_behaves_like 'mea
