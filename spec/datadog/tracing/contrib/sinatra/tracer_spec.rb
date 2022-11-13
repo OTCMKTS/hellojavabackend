@@ -360,4 +360,145 @@ RSpec.describe 'Sinatra instrumentation' do
 
       before { is_expected.to be_ok }
 
-      contex
+      context 'with a header that should be tagged' do
+        let(:request_headers) { ['X-Request-Header'] }
+        let(:headers) { { 'HTTP_X_REQUEST_HEADER' => header_value } }
+        let(:header_value) { SecureRandom.uuid }
+
+        it { expect(span.get_tag('http.request.headers.x-request-header')).to eq(header_value) }
+      end
+
+      context 'with a header that should not be tagged' do
+        let(:headers) { { 'HTTP_X_REQUEST_HEADER' => header_value } }
+        let(:header_value) { SecureRandom.uuid }
+
+        it { expect(span.get_tag('http.request.headers.x-request-header')).to be nil }
+      end
+    end
+  end
+
+  shared_examples 'distributed tracing' do
+    context 'with default settings' do
+      context 'and a simple request is made' do
+        subject(:response) { get '/', query_string, headers }
+
+        let(:query_string) { {} }
+        let(:headers) { {} }
+
+        context 'with distributed tracing headers' do
+          let(:headers) do
+            {
+              'HTTP_X_DATADOG_TRACE_ID' => '1',
+              'HTTP_X_DATADOG_PARENT_ID' => '2',
+              'HTTP_X_DATADOG_SAMPLING_PRIORITY' => Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP.to_s,
+              'HTTP_X_DATADOG_ORIGIN' => 'synthetics'
+            }
+          end
+
+          it do
+            is_expected.to be_ok
+            expect(trace.sampling_priority).to eq(2)
+            expect(trace.origin).to eq('synthetics')
+            expect(span.trace_id).to eq(1)
+            expect(span.parent_id).to_not eq(2)
+            expect(span.parent_id).to eq(rack_span.span_id)
+            expect(rack_span.trace_id).to eq(1)
+            expect(rack_span.parent_id).to eq(2)
+          end
+        end
+      end
+    end
+
+    context 'with distributed tracing disabled' do
+      let(:configuration_options) { super().merge(distributed_tracing: false) }
+
+      context 'and a simple request is made' do
+        subject(:response) { get '/', query_string, headers }
+
+        let(:query_string) { {} }
+        let(:headers) { {} }
+
+        context 'with distributed tracing headers' do
+          let(:headers) do
+            {
+              'HTTP_X_DATADOG_TRACE_ID' => '1',
+              'HTTP_X_DATADOG_PARENT_ID' => '2',
+              'HTTP_X_DATADOG_SAMPLING_PRIORITY' => Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP.to_s,
+              'HTTP_X_DATADOG_ORIGIN' => 'synthetics'
+            }
+          end
+
+          it do
+            is_expected.to be_ok
+            expect(trace.sampling_priority).to_not eq(2)
+            expect(trace.origin).to_not eq('synthetics')
+
+            expect(span.trace_id).to_not eq(1)
+            expect(span.parent_id).to_not eq(2)
+            expect(span.parent_id).to eq(rack_span.span_id)
+            expect(rack_span.trace_id).to_not eq(1)
+            expect(rack_span.parent_id).to_not eq(2)
+          end
+        end
+      end
+    end
+  end
+
+  context 'with classic app' do
+    let(:sinatra_app) do
+      sinatra_routes = self.sinatra_routes
+      Class.new(Sinatra::Application) do
+        instance_exec(&sinatra_routes)
+      end
+    end
+
+    include_examples 'sinatra examples', app_name: 'Sinatra::Application'
+  end
+
+  context 'with modular app' do
+    let(:sinatra_app) do
+      stub_const(
+        'NestedApp',
+        Class.new(Sinatra::Base) do
+          get '/nested' do
+            headers['X-Request-ID'] = 'test id'
+            'nested ok'
+          end
+        end
+      )
+
+      sinatra_routes = self.sinatra_routes
+      stub_const(
+        'App',
+        Class.new(Sinatra::Base) do
+          use NestedApp
+
+          instance_exec(&sinatra_routes)
+        end
+      )
+    end
+
+    context 'with nested app' do
+      let(:span) do
+        spans.find { |x| x.name == Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_REQUEST }
+      end
+
+      let(:rack_span) do
+        spans.find { |x| x.name == Datadog::Tracing::Contrib::Rack::Ext::SPAN_REQUEST }
+      end
+
+      context 'making request to top level app' do
+        include_examples 'sinatra examples', app_name: 'App'
+        include_examples 'header tags'
+        include_examples 'distributed tracing'
+      end
+
+      context 'making request to nested app' do
+        let(:url) { '/nested' }
+
+        # TODO: change description
+        context 'asserting the parent span' do
+          include_examples 'sinatra examples', app_name: 'NestedApp'
+          include_examples 'header tags'
+          include_examples 'distributed tracing'
+        end
