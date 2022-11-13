@@ -231,4 +231,133 @@ RSpec.describe 'Sinatra instrumentation' do
                 .to eq('render_template')
             end
 
-            it_behaves_like 'mea
+            it_behaves_like 'measured span for integration', true
+          end
+
+          describe 'the sinatra.render_template grandchild span' do
+            subject(:span) { template_child_span }
+
+            it do
+              expect(span.name).to eq(Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_RENDER_TEMPLATE)
+              expect(span.resource).to eq('sinatra.render_template')
+              expect(span.get_tag('sinatra.template_name')).to eq('layout')
+              expect(span.parent_id).to eq(template_parent_span.span_id)
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+              expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+                .to eq('render_template')
+            end
+
+            it_behaves_like 'measured span for integration', true
+          end
+        end
+
+        context 'and a bad request is made' do
+          subject(:response) { get '/client_error' }
+
+          it do
+            is_expected.to be_bad_request
+            expect(span).to_not have_error
+          end
+        end
+
+        context 'and a request resulting in an internal error is made' do
+          subject(:response) { get '/server_error' }
+
+          it do
+            is_expected.to be_server_error
+            expect(spans).to have(3).items
+            expect(span).to_not have_error_type
+            expect(span).to_not have_error_message
+            expect(span.status).to eq(1)
+          end
+        end
+
+        context 'and a request that raises an exception is made' do
+          subject(:response) { get '/error' }
+
+          it do
+            is_expected.to be_server_error
+            expect(spans).to have(3).items
+            expect(span).to have_error_type('RuntimeError')
+            expect(span).to have_error_message('test error')
+            expect(span.status).to eq(1)
+          end
+        end
+
+        context 'and a request to a nonexistent route' do
+          subject(:response) { get '/not_a_route' }
+
+          it do
+            is_expected.to be_not_found
+            expect(trace).to_not be nil
+            expect(spans).to have(2).items
+
+            expect(trace.resource).to eq('GET')
+
+            expect(span.service).to eq(tracer.default_service)
+            expect(span.resource).to eq('GET')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_METHOD)).to eq('GET')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_URL)).to eq('/not_a_route')
+
+            expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_ROUTE_PATH)).to be_nil
+
+            expect(span.span_type).to eq(Datadog::Tracing::Metadata::Ext::HTTP::TYPE_INBOUND)
+            expect(span).to_not have_error
+            expect(span.parent_id).to be(rack_span.span_id)
+
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+            expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+              .to eq('request')
+
+            expect(rack_span.resource).to eq('GET')
+          end
+        end
+
+        describe 'span resource' do
+          subject(:response) { get '/span_resource' }
+
+          before do
+            is_expected.to be_ok
+          end
+
+          it 'sets the route span resource before calling the route' do
+            route_span = spans.find { |s| s.name == 'sinatra.route' }
+            expect(route_span.name).to eq('sinatra.route')
+            expect(route_span.resource).to eq('GET /span_resource')
+          end
+
+          it 'sets the request span resource before calling the route' do
+            request_span = spans.find { |s| s.name == 'sinatra.request' }
+            expect(request_span.name).to eq('sinatra.request')
+            expect(request_span.resource).to eq('GET /span_resource')
+          end
+        end
+      end
+    end
+
+    context 'when the tracer is disabled' do
+      subject(:response) { get '/' }
+
+      let(:tracer) { new_tracer(enabled: false) }
+
+      it do
+        is_expected.to be_ok
+        expect(spans).to be_empty
+      end
+    end
+  end
+
+  shared_examples 'header tags' do
+    context 'and a simple request is made' do
+      subject(:response) { get '/', query_string, headers }
+
+      let(:query_string) { {} }
+      let(:headers) { {} }
+
+      let(:configuration_options) { super().merge(headers: { request: request_headers, response: response_headers }) }
+      let(:request_headers) { [] }
+      let(:response_headers) { [] }
+
+      before { is_expected.to be_ok }
+
+      contex
