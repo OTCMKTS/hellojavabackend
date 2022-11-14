@@ -502,3 +502,55 @@ RSpec.describe 'Sinatra instrumentation' do
           include_examples 'header tags'
           include_examples 'distributed tracing'
         end
+      end
+    end
+  end
+
+  RSpec::Matchers.define :be_request_span do |opts = {}|
+    match(notify_expectation_failures: true) do |span|
+      expect(span.service).to eq(tracer.default_service)
+      expect(span.resource).to eq(resource)
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_METHOD)).to eq(http_method)
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::HTTP::TAG_URL)).to eq(url)
+      expect(span.get_tag('http.response.headers.content-type')).to eq('text/html;charset=utf-8')
+      expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_ROUTE_PATH)).to eq(url)
+      expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_SCRIPT_NAME)).to be_nil
+      expect(span.span_type).to eq(Datadog::Tracing::Metadata::Ext::HTTP::TYPE_INBOUND)
+
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+
+      case span.name
+      when Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_REQUEST
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('request')
+      when Datadog::Tracing::Contrib::Sinatra::Ext::SPAN_ROUTE
+        expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+          .to eq('route')
+      else
+        raise "Unknown span name: #{span.name}"
+      end
+
+      expect(span).to_not have_error
+      if opts[:parent]
+        expect(span.parent_id).to be(opts[:parent].span_id)
+      else
+        expect(span).to be_root_span
+      end
+    end
+  end
+
+  RSpec::Matchers.define :be_route_span do |opts = {}|
+    match(notify_expectation_failures: true) do |span|
+      expect(span.service).to eq(tracer.default_service)
+      expect(span.resource).to eq(resource)
+      expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_APP_NAME)).to eq(opts[:app_name])
+      expect(span.get_tag(Datadog::Tracing::Contrib::Sinatra::Ext::TAG_ROUTE_PATH)).to eq(url)
+      expect(span.span_type).to eq(Datadog::Tracing::Metadata::Ext::HTTP::TYPE_INBOUND)
+      expect(span).to_not have_error
+      expect(span.parent_id).to be(opts[:parent].span_id) if opts[:parent]
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sinatra')
+      expect(span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION))
+        .to eq('route')
+    end
+  end
+end
