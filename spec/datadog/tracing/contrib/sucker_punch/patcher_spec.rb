@@ -147,4 +147,62 @@ RSpec.describe 'sucker_punch instrumentation' do
       expect(enqueue_span.get_tag('sucker_punch.queue')).to eq(worker_class.to_s)
       expect(enqueue_span.get_tag('sucker_punch.perform_in')).to eq(0)
       expect(enqueue_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_COMPONENT)).to eq('sucker_punch')
-      expect(enqueue_span.get_tag(Datadog::Tracin
+      expect(enqueue_span.get_tag(Datadog::Tracing::Metadata::Ext::TAG_OPERATION)).to eq('perform_in')
+    end
+  end
+
+  context 'keyword arguments' do
+    # We do not want mocks or stubs here, as these would define their own
+    # wrapper or replacement methods interfering with the argument passing
+    # test, therefore we record behaviour data on a side-effect of an object.
+    let(:recorded) { [] }
+
+    let(:worker_class) do
+      clazz = Class.new do
+        include SuckerPunch::Job
+
+        def perform(*args, required:)
+          self.class.instance_variable_get(:@recorded) << [args, required]
+        end
+      end
+
+      clazz.instance_variable_set(:@recorded, recorded)
+
+      clazz
+    end
+
+    context 'internal call to job' do
+      subject(:dummy_worker) { worker_class.__run_perform(1, required: 2) }
+      let(:expect_thread?) { false }
+
+      it 'passes kwargs correctly through instrumentation' do
+        dummy_worker
+        try_wait_until { recorded.any? }
+
+        expect(recorded.first).to eq([[1], 2])
+      end
+    end
+
+    context 'async job' do
+      subject(:dummy_worker) { worker_class.perform_async(1, required: 2) }
+
+      it 'passes kwargs correctly through instrumentation' do
+        dummy_worker
+        try_wait_until { recorded.any? }
+
+        expect(recorded.first).to eq([[1], 2])
+      end
+    end
+
+    context 'delayed job' do
+      subject(:dummy_worker) { worker_class.perform_in(0, 1, required: 2) }
+
+      it 'passes kwargs correctly through instrumentation' do
+        dummy_worker
+        try_wait_until { recorded.any? }
+
+        expect(recorded.first).to eq([[1], 2])
+      end
+    end
+  end
+end
