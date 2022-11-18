@@ -31,4 +31,11 @@ RSpec.describe Datadog::Tracing::Contrib::Utils::Database do
         it { is_expected.to eq('postgres') }
       end
 
-  
+      context 'customdb' do
+        let(:value) { 'customdb' }
+
+        it { is_expected.to eq(value) }
+      end
+    end
+  end
+end
