@@ -16,4 +16,18 @@ RSpec.describe Datadog::Tracing::Metadata::Errors do
     subject(:set_error) { test_object.set_error(error) }
 
     let(:error) { RuntimeError.new('oops') }
-    let(:backtrace) { %w[method1 method2 meth
+    let(:backtrace) { %w[method1 method2 method3] }
+
+    before { error.set_backtrace(backtrace) }
+
+    it do
+      set_error
+
+      expect(test_object).to have_error_message('oops')
+      expect(test_object).to have_error_type('RuntimeError')
+      backtrace.each do |method|
+        expect(test_object).to have_error_stack(include(method))
+      end
+    end
+  end
+end
