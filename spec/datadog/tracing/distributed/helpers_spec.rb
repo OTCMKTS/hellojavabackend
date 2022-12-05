@@ -40,4 +40,29 @@ RSpec.describe Datadog::Tracing::Distributed::Helpers do
   end
 
   describe '.parse_hex_id' do
-    context 'when given with `length`' d
+    context 'when given with `length`' do
+      [
+        [nil, nil],
+        ['', nil],
+        ['not a number', nil],
+        ['1 2', nil], # "1 2".to_i => 1, but it's an invalid format
+        ['1.2', nil],
+        ['0', 0],
+        ['1', 1],
+        ['-1', -1],
+        ['123456789', 0x123456789],
+        ['abcdef', 0xabcdef], # lower case
+        ['ABCDEF', 0xabcdef], # upper case
+        ['00123456789', 0x123456789], # leading zeros
+        ['000abcdef', 0xabcdef], # leading zeros
+        ['000ABCDEF', 0xabcdef], # leading zeros
+        ['aaaaaaaaaaaaaaaaffffffffffffffff', 0xaaaaaaaaaaaaaaaaffffffffffffffff], # 128 bits
+        ['ffffffffffffffff', 0xffffffffffffffff], # 64 bits
+      ].each do |value, expected|
+        context "when given #{value.inspect}" do
+          it { expect(described_class.parse_hex_id(value)).to eq(expected) }
+        end
+      end
+    end
+  end
+end
