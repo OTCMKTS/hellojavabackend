@@ -94,4 +94,11 @@ RSpec.describe Datadog::Tracing::Pipeline::SpanFilter do
       end
     end
 
-    it 'doe
+    it 'does not filter spans that raise an exception' do
+      expect { span_filter.call(trace) }
+        .to change { trace.spans }
+        .from([span_a, span_b, span_c])
+        .to([span_a, span_c])
+    end
+  end
+end
