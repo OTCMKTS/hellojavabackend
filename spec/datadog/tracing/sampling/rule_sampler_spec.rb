@@ -186,3 +186,62 @@ RSpec.describe Datadog::Tracing::Sampling::RuleSampler do
         it 'sets the agent rate metric' do
           expect(default_sampler).to receive(:sample_rate)
             .with(trace)
+            .and_return(sample_rate)
+          sample
+          expect(trace.agent_sample_rate).to eq(sample_rate)
+        end
+      end
+    end
+  end
+
+  describe '#sample?' do
+    subject(:sample?) { rule_sampler.sample?(trace) }
+
+    it { expect { sample? }.to raise_error(StandardError, 'RuleSampler cannot be evaluated without side-effects') }
+  end
+
+  describe '#update' do
+    subject(:update) { rule_sampler.update(rates, decision: decision) }
+
+    let(:rates) { { 'service:my-service,env:test' => rand } }
+    let(:decision) { 'test decision' }
+
+    context 'when configured with a default sampler' do
+      context 'that responds to #update' do
+        let(:default_sampler) { sampler_class.new }
+        let(:sampler_class) do
+          stub_const(
+            'TestSampler',
+            Class.new(Datadog::Tracing::Sampling::Sampler) do
+              def update(rates, decision: nil)
+                [rates, decision]
+              end
+            end
+          )
+        end
+
+        before do
+          allow(default_sampler).to receive(:update)
+          update
+        end
+
+        it 'forwards to the default sampler' do
+          expect(default_sampler).to have_received(:update)
+            .with(rates, decision: decision)
+        end
+      end
+
+      context 'that does not respond to #update' do
+        let(:default_sampler) { sampler_class.new }
+        let(:sampler_class) do
+          stub_const('TestSampler', Class.new(Datadog::Tracing::Sampling::Sampler))
+        end
+
+        it 'does not forward to the default sampler' do
+          expect { update }.to_not raise_error
+          is_expected.to be false
+        end
+      end
+    end
+  end
+end
