@@ -397,4 +397,126 @@ RSpec.describe Datadog::Tracing::SpanOperation do
       let(:error) { error_class.new }
 
       let(:error_class) do
-        stub_const('TestError', Cla
+        stub_const('TestError', Class.new(StandardError))
+      end
+    end
+
+    shared_context 'an Exception' do
+      let(:error) { error_class.new }
+
+      let(:error_class) do
+        # rubocop:disable Lint/InheritException
+        stub_const('TestException', Class.new(Exception))
+        # rubocop:enable Lint/InheritException
+      end
+    end
+
+    context 'when the span has not yet started' do
+      it do
+        expect { |b| span_op.measure(&b) }
+          .to yield_with_args(span_op)
+      end
+
+      it 'measures the operation' do
+        is_expected.to be return_value
+        expect(span_op.started?).to be true
+        expect(span_op.finished?).to be true
+        expect(span_op.start_time).to_not be nil
+        expect(span_op.end_time).to_not be nil
+        expect(span_op.status).to eq(0)
+      end
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+
+        before { measure }
+
+        it do
+          expect(callback_spy).to have_received(:before_start).with(span_op).ordered
+          expect(callback_spy).to have_received(:after_stop).with(span_op).ordered
+          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::Span), span_op).ordered
+          expect(callback_spy).to_not have_received(:on_error)
+        end
+      end
+    end
+
+    context 'when not given a block' do
+      subject(:measure) { span_op.measure }
+      it { expect { measure }.to raise_error(ArgumentError) }
+    end
+
+    context 'when the operation has already been measured' do
+      before { span_op.measure(&block) }
+      it { expect { measure }.to raise_error(Datadog::Tracing::SpanOperation::AlreadyStartedError) }
+    end
+
+    context 'when the operation has already been started' do
+      before { span_op.start }
+      it { expect { measure }.to raise_error(Datadog::Tracing::SpanOperation::AlreadyStartedError) }
+    end
+
+    context 'when the operation has already been finished' do
+      before { span_op.finish }
+      it { expect { measure }.to raise_error(Datadog::Tracing::SpanOperation::AlreadyStartedError) }
+    end
+
+    context 'when a StandardError is raised during the operation' do
+      include_context 'a StandardError'
+
+      let(:block) { proc { raise error } }
+
+      it do
+        expect { measure }.to raise_error(error)
+
+        expect(span_op.started?).to be true
+        expect(span_op.finished?).to be true
+        expect(span_op.start_time).to_not be nil
+        expect(span_op.end_time).to_not be nil
+
+        # Technically not an error status, because the operation didn't
+        # cause the error, the tracing did. This doesn't count.
+        expect(span_op.status).to eq(1)
+      end
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+
+        before { expect { measure }.to raise_error(error) }
+
+        it do
+          expect(callback_spy).to have_received(:before_start).with(span_op).ordered
+          expect(callback_spy).to have_received(:after_stop).with(span_op).ordered
+          expect(callback_spy).to have_received(:on_error).with(span_op, error).ordered
+          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::Span), span_op).ordered
+        end
+      end
+    end
+
+    context 'when an Exception is raised during the operation' do
+      include_context 'an Exception'
+
+      let(:block) { proc { raise error } }
+
+      it do
+        expect { measure }.to raise_error(error)
+
+        expect(span_op.started?).to be true
+        expect(span_op.finished?).to be true
+        expect(span_op.start_time).to_not be nil
+        expect(span_op.end_time).to_not be nil
+
+        # Technically not an error status, because the operation didn't
+        # cause the error, the tracing did. This doesn't count.
+        expect(span_op.status).to eq(1)
+      end
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+
+        before { expect { measure }.to raise_error(error) }
+
+        it do
+          expect(callback_spy).to have_received(:before_start).with(span_op).ordered
+          expect(callback_spy).to have_received(:after_stop).with(span_op).ordered
+          expect(callback_spy).to have_received(:on_error).with(span_op, error).ordered
+          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::
