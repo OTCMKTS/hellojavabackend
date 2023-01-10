@@ -248,4 +248,153 @@ RSpec.describe Datadog::Tracing::SpanOperation do
       end
 
       describe ':name' do
-        it_beh
+        it_behaves_like 'a string property', nillable: false do
+          let(:property) { :name }
+
+          # :name is not a keyword argument, but positional.
+          # We swap those two here.
+          let(:options) { {} }
+          let(:name) { value }
+        end
+      end
+
+      describe ':parent_id' do
+        let(:options) { { parent_id: parent_id } }
+
+        context 'that is nil' do
+          let(:parent_id) { nil }
+          it { is_expected.to have_attributes(parent_id: 0) }
+
+          context 'and :child_of is defined' do
+            include_context 'parent span operation'
+            let(:options) { { child_of: parent, parent_id: parent_id } }
+
+            it_behaves_like 'a child span operation'
+          end
+        end
+
+        context 'that is an Integer' do
+          let(:parent_id) { instance_double(Integer) }
+          it { is_expected.to have_attributes(parent_id: parent_id) }
+
+          context 'and :child_of is defined' do
+            include_context 'parent span operation'
+            let(:options) { { child_of: parent, parent_id: parent_id } }
+
+            # :child_of will override :parent_id, if both are provided.
+            it { is_expected.to have_attributes(parent_id: parent.span_id) }
+          end
+        end
+      end
+
+      describe ':resource' do
+        it_behaves_like 'a string property' do
+          let(:property) { :resource }
+        end
+      end
+
+      describe ':service' do
+        it_behaves_like 'a string property' do
+          let(:property) { :service }
+        end
+      end
+
+      describe ':start_time' do
+        let(:options) { { start_time: start_time } }
+        let(:start_time) { instance_double(Time) }
+
+        context 'that is nil' do
+          let(:start_time) { nil }
+          it { is_expected.to have_attributes(start_time: nil) }
+        end
+
+        context 'that is a Time' do
+          let(:start_time) { instance_double(Time) }
+          it { is_expected.to have_attributes(start_time: start_time) }
+        end
+      end
+
+      describe ':tags' do
+        let(:options) { { tags: tags } }
+
+        context 'that is nil' do
+          let(:tags) { nil }
+
+          context 'and :child_of is not given' do
+            it_behaves_like 'a root span operation'
+          end
+
+          context 'and :child_of is given' do
+            include_context 'parent span operation'
+            let(:options) { { child_of: parent, tags: tags } }
+
+            it_behaves_like 'a child span operation'
+          end
+        end
+
+        context 'that is a Hash' do
+          let(:tags) { { 'custom_tag' => 'custom_value' } }
+
+          context 'and :child_of is not given' do
+            it_behaves_like 'a root span operation'
+            it { expect(span_op.get_tag('custom_tag')).to eq(tags['custom_tag']) }
+          end
+
+          context 'and :child_of is given' do
+            include_context 'parent span operation'
+            let(:options) { { child_of: parent, tags: tags } }
+
+            it_behaves_like 'a child span operation'
+            it { expect(span_op.get_tag('custom_tag')).to eq(tags['custom_tag']) }
+          end
+        end
+      end
+
+      describe ':trace_id' do
+        let(:options) { { trace_id: trace_id } }
+
+        context 'that is nil' do
+          let(:trace_id) { nil }
+          it { is_expected.to have_attributes(trace_id: kind_of(Integer)) }
+        end
+
+        context 'that is an Integer' do
+          let(:trace_id) { Datadog::Tracing::Utils.next_id }
+          it { is_expected.to have_attributes(trace_id: trace_id) }
+        end
+      end
+
+      describe ':type' do
+        it_behaves_like 'a string property' do
+          let(:property) { :type }
+        end
+      end
+    end
+  end
+
+  describe '#resource=' do
+    subject!(:resource=) { span_op.resource = resource }
+
+    context 'with a string that is not in UTF-8' do
+      let(:resource) { 'legacy'.encode(Encoding::ASCII) }
+      it { expect(span_op.resource).to eq(resource) }
+      it { expect(span_op.resource.encoding).to eq(Encoding::UTF_8) }
+    end
+  end
+
+  describe '#measure' do
+    subject(:measure) { span_op.measure(&block) }
+
+    let(:block) do
+      allow(block_spy).to receive(:measure).and_return(return_value)
+      proc { |op| block_spy.measure(op) }
+    end
+
+    let(:return_value) { SecureRandom.uuid }
+    let(:block_spy) { spy('block') }
+
+    shared_context 'a StandardError' do
+      let(:error) { error_class.new }
+
+      let(:error_class) do
+        stub_const('TestError', Cla
