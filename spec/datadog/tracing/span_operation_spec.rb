@@ -519,4 +519,145 @@ RSpec.describe Datadog::Tracing::SpanOperation do
           expect(callback_spy).to have_received(:before_start).with(span_op).ordered
           expect(callback_spy).to have_received(:after_stop).with(span_op).ordered
           expect(callback_spy).to have_received(:on_error).with(span_op, error).ordered
-          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::
+          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::Span), span_op).ordered
+        end
+      end
+    end
+
+    context 'identifying service_entry_span' do
+      context 'when service of root and child are `nil`' do
+        it do
+          root_span_op = described_class.new('root')
+          child_span_op = described_class.new('child_1', child_of: root_span_op)
+
+          root_span_op.measure do
+            child_span_op.measure do
+              # Do stuff
+            end
+          end
+
+          root_span = root_span_op.finish
+          child_span = child_span_op.finish
+
+          expect(root_span.__send__(:service_entry?)).to be true
+          expect(child_span.__send__(:service_entry?)).to be false
+        end
+      end
+
+      context 'when service of root and child are identical' do
+        it do
+          root_span_op = described_class.new('root', service: 'root_service')
+          child_span_op = described_class.new('child_1', child_of: root_span_op, service: root_span_op.service)
+
+          root_span_op.measure do
+            child_span_op.measure do
+              # Do stuff
+            end
+          end
+
+          root_span = root_span_op.finish
+          child_span = child_span_op.finish
+
+          expect(root_span.__send__(:service_entry?)).to be true
+          expect(child_span.__send__(:service_entry?)).to be false
+        end
+      end
+
+      context 'when service of root and child are different' do
+        it do
+          root_span_op = described_class.new('root')
+          child_span_op = described_class.new('child_1', child_of: root_span_op, service: 'child_service')
+
+          root_span_op.measure do
+            child_span_op.measure do
+              # Do stuff
+            end
+          end
+
+          root_span = root_span_op.finish
+          child_span = child_span_op.finish
+
+          expect(root_span.__send__(:service_entry?)).to be true
+          expect(child_span.__send__(:service_entry?)).to be true
+        end
+      end
+
+      context 'when service of root and child are different, overriden within the measure block' do
+        it do
+          root_span_op = described_class.new('root')
+          child_span_op = described_class.new('child_1', child_of: root_span_op)
+
+          root_span_op.measure do
+            child_span_op.measure do |span_op|
+              span_op.service = 'child_service'
+
+              # Do stuff
+            end
+          end
+
+          root_span = root_span_op.finish
+          child_span = child_span_op.finish
+
+          expect(root_span.__send__(:service_entry?)).to be true
+          expect(child_span.__send__(:service_entry?)).to be true
+        end
+      end
+    end
+  end
+
+  describe '#start' do
+    shared_examples 'started span' do
+      let(:start_time) { kind_of(Time) }
+
+      it { expect { start }.to change { span_op.start_time }.from(nil).to(start_time) }
+      # Because span is still running, duration is unavailable.
+      it { expect { start }.to_not(change { span_op.duration }) }
+
+      context 'then #stop' do
+        before { start }
+        it { expect { span_op.stop }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+      end
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+        before { start }
+        it { expect(callback_spy).to have_received(:before_start).with(span_op) }
+      end
+    end
+
+    context 'given nothing' do
+      subject(:start) { span_op.start }
+      it_behaves_like 'started span'
+    end
+
+    context 'given nil' do
+      subject(:start) { span_op.start(nil) }
+      it_behaves_like 'started span'
+    end
+
+    context 'given a Time' do
+      subject(:start) { span_op.start(start_time) }
+      let(:start_time) { Datadog::Core::Utils::Time.now.utc }
+
+      it { expect { start }.to change { span_op.start_time }.from(nil).to(start_time) }
+      # Because span is still running, duration is unavailable.
+      it { expect { start }.to_not(change { span_op.duration }) }
+
+      context 'then #stop' do
+        before { start }
+        it { expect { span_op.stop }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+      end
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+        before { start }
+        it { expect(callback_spy).to have_received(:before_start).with(span_op) }
+      end
+    end
+
+    context 'when already started' do
+      subject(:start) { span_op.start }
+
+      let!(:original_start_time) do
+        span_op.start
+        span_o
