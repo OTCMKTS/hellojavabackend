@@ -782,4 +782,144 @@ RSpec.describe Datadog::Tracing::SpanOperation do
       it { is_expected.to be false }
     end
 
-    it { expect { span_op.start }.to change { span_op.started? }.from(fa
+    it { expect { span_op.start }.to change { span_op.started? }.from(false).to(true) }
+    it { expect { span_op.stop }.to change { span_op.started? }.from(false).to(true) }
+    it { expect { span_op.finish }.to change { span_op.started? }.from(false).to(true) }
+  end
+
+  describe '#stopped?' do
+    subject(:stopped?) { span_op.stopped? }
+
+    context 'when span hasn\'t been started or stopped' do
+      it { is_expected.to be false }
+    end
+
+    it { expect { span_op.start }.to_not change { span_op.stopped? }.from(false) }
+    it { expect { span_op.stop }.to change { span_op.stopped? }.from(false).to(true) }
+    it { expect { span_op.finish }.to change { span_op.stopped? }.from(false).to(true) }
+  end
+
+  describe '#finish' do
+    subject(:finish) { span_op.finish }
+
+    shared_examples 'finished span' do
+      let(:end_time) { kind_of(Time) }
+
+      it { expect { finish }.to change { span_op.end_time }.from(nil).to(end_time) }
+      it { expect { finish }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+
+      context 'and callbacks have been configured' do
+        include_context 'callbacks'
+        before { finish }
+        it do
+          expect(callback_spy).to have_received(:after_stop).with(span_op).ordered
+          expect(callback_spy).to have_received(:after_finish).with(kind_of(Datadog::Tracing::Span), span_op).ordered
+        end
+      end
+    end
+
+    context 'given nothing' do
+      subject(:finish) { span_op.finish }
+      it_behaves_like 'finished span' do
+        before { span_op.start }
+      end
+    end
+
+    context 'given nil' do
+      subject(:finish) { span_op.finish(nil) }
+      it_behaves_like 'finished span' do
+        before { span_op.start }
+      end
+    end
+
+    context 'given a Time' do
+      subject(:finish) { span_op.finish(end_time) }
+
+      it_behaves_like 'finished span' do
+        let(:end_time) { Datadog::Core::Utils::Time.now.utc }
+        before { span_op.start }
+      end
+    end
+
+    context 'when not started' do
+      it { expect { finish }.to change { span_op.end_time }.from(nil).to(kind_of(Time)) }
+      # Will be a float, not 0 time, because "duration" is used, not time stamps.
+      it { expect { finish }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+    end
+
+    context 'when already finished' do
+      let!(:original_end_time) do
+        span_op.start
+        @original_span = span_op.finish
+        span_op.end_time
+      end
+      let(:original_span) { @original_span }
+
+      it 'does not overwrite the previous end time' do
+        expect(original_end_time).to_not be nil
+        expect { finish }.to_not change { span_op.end_time }.from(original_end_time)
+      end
+
+      # Expect Span to be memoized
+      it 'returns the same Span object' do
+        expect(span_op.finish).to be(original_span)
+      end
+    end
+  end
+
+  describe '#finished?' do
+    subject(:finished?) { span_op.finished? }
+
+    context 'when operation hasn\'t been started' do
+      it { is_expected.to be false }
+    end
+
+    context 'when operation has started but hasn\'t finished' do
+      before { span_op.start }
+      it { is_expected.to be false }
+    end
+
+    context 'when operation is finished' do
+      before { span_op.finish }
+      it { is_expected.to be true }
+    end
+  end
+
+  describe '#duration' do
+    subject(:duration) { span_op.duration }
+
+    let(:duration_wall_time) { 0.0001 }
+
+    context 'without start or end time provided' do
+      let(:static_time) { Time.utc(2010, 9, 15, 22, 3, 15) }
+
+      before do
+        # We set the same time no matter what.
+        # If duration is greater than zero but start_time == end_time, we can
+        # be sure we're using the monotonic time.
+        allow(Datadog::Core::Utils::Time).to receive(:now)
+          .and_return(static_time)
+      end
+
+      it { is_expected.to be nil }
+
+      context 'when started then stopped' do
+        before do
+          span_op.start
+          sleep(0.0002)
+          span_op.stop
+        end
+
+        it 'uses monotonic time' do
+          expect((duration.to_f * 1e9).to_i).to be > 0
+          expect(span_op.end_time).to eq static_time
+          expect(span_op.start_time).to eq static_time
+          expect(span_op.end_time - span_op.start_time).to eq 0
+        end
+      end
+    end
+
+    context 'with start_time provided' do
+      # set a start time considerably longer than span duration
+      # set a day in the past and then measure duration is longer than
+      # am
