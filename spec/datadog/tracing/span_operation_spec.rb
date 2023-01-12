@@ -660,4 +660,126 @@ RSpec.describe Datadog::Tracing::SpanOperation do
 
       let!(:original_start_time) do
         span_op.start
-        span_o
+        span_op.start_time
+      end
+
+      it 'does not overwrite the previous start time' do
+        expect(original_start_time).to_not be nil
+        expect { start }.to_not change { span_op.start_time }.from(original_start_time)
+      end
+    end
+
+    context 'when already stopped' do
+      subject(:start) { span_op.start }
+
+      let!(:original_start_time) do
+        span_op.start
+        span_op.stop
+        span_op.start_time
+      end
+
+      it 'does not overwrite the previous start time' do
+        expect(original_start_time).to_not be nil
+        expect { start }.to_not change { span_op.start_time }.from(original_start_time)
+      end
+    end
+  end
+
+  describe '#stop' do
+    subject(:stop) { span_op.stop }
+
+    shared_examples 'stopped span' do
+      let(:end_time) { kind_of(Time) }
+
+      context 'which wasn\'t already started' do
+        it { expect { stop }.to change { span_op.start_time }.from(nil).to(end_time) }
+        it { expect { stop }.to change { span_op.end_time }.from(nil).to(end_time) }
+        it { expect { stop }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+
+        it { expect { stop }.to change { span_op.started? }.from(false).to(true) }
+        it { expect { stop }.to change { span_op.stopped? }.from(false).to(true) }
+        it { expect { stop }.to_not change { span_op.finished? }.from(false) }
+
+        context 'and callbacks have been configured' do
+          include_context 'callbacks'
+          before { stop }
+          it do
+            expect(callback_spy).to have_received(:after_stop).with(span_op)
+            expect(callback_spy).to have_received(:before_start).with(span_op)
+            expect(callback_spy).to_not have_received(:after_finish)
+          end
+        end
+      end
+
+      context 'when already started' do
+        let!(:start_time) { span_op.start_time = Time.now }
+
+        it { expect { stop }.to_not change { span_op.start_time }.from(start_time) }
+        it { expect { stop }.to change { span_op.end_time }.from(nil).to(end_time) }
+        it { expect { stop }.to change { span_op.duration }.from(nil).to(kind_of(Float)) }
+
+        it { expect { stop }.to_not change { span_op.started? }.from(true) }
+        it { expect { stop }.to change { span_op.stopped? }.from(false).to(true) }
+        it { expect { stop }.to_not change { span_op.finished? }.from(false) }
+
+        context 'and callbacks have been configured' do
+          include_context 'callbacks'
+          before { stop }
+          it do
+            expect(callback_spy).to have_received(:after_stop).with(span_op)
+            expect(callback_spy).to_not have_received(:before_start)
+            expect(callback_spy).to_not have_received(:after_finish)
+          end
+        end
+      end
+
+      context 'when already stopped' do
+        let!(:original_end_time) { span_op.end_time = Time.now }
+
+        it { expect { stop }.to_not change { span_op.start_time }.from(original_end_time) }
+        it { expect { stop }.to_not change { span_op.end_time }.from(original_end_time) }
+        it { expect { stop }.to_not change { span_op.duration }.from(0) }
+
+        it { expect { stop }.to_not change { span_op.started? }.from(true) }
+        it { expect { stop }.to_not change { span_op.stopped? }.from(true) }
+        it { expect { stop }.to_not change { span_op.finished? }.from(false) }
+
+        context 'and callbacks have been configured' do
+          include_context 'callbacks'
+          before { stop }
+          it do
+            expect(callback_spy).to_not have_received(:after_stop)
+            expect(callback_spy).to_not have_received(:before_start)
+            expect(callback_spy).to_not have_received(:after_finish)
+          end
+        end
+      end
+    end
+
+    context 'given nothing' do
+      subject(:stop) { span_op.stop }
+      it_behaves_like 'stopped span'
+    end
+
+    context 'given nil' do
+      subject(:stop) { span_op.stop(nil) }
+      it_behaves_like 'stopped span'
+    end
+
+    context 'given a Time' do
+      subject(:stop) { span_op.stop(end_time) }
+
+      it_behaves_like 'stopped span' do
+        let(:end_time) { Datadog::Core::Utils::Time.now.utc }
+      end
+    end
+  end
+
+  describe '#started?' do
+    subject(:started?) { span_op.started? }
+
+    context 'when span hasn\'t been started or stopped' do
+      it { is_expected.to be false }
+    end
+
+    it { expect { span_op.start }.to change { span_op.started? }.from(fa
