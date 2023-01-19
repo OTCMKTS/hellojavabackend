@@ -922,4 +922,133 @@ RSpec.describe Datadog::Tracing::SpanOperation do
     context 'with start_time provided' do
       # set a start time considerably longer than span duration
       # set a day in the past and then measure duration is longer than
-      # am
+      # amount of time slept, which would represent monotonic
+      let!(:start_time) { Time.now - (duration_wall_time * 1e9) }
+
+      it 'does not use monotonic time' do
+        span_op.start(start_time)
+        sleep(duration_wall_time)
+        span_op.stop
+
+        puts "\nduration: #{duration}\nwall_time: #{duration_wall_time * 1e9}\n"
+        expect(duration).to be_within(1).of(duration_wall_time * 1e9)
+      end
+
+      context 'and end_time provided' do
+        let(:end_time) { start_time + 123.456 }
+
+        it 'respects the exact times provided' do
+          span_op.start(start_time)
+          sleep(duration_wall_time)
+          span_op.stop(end_time)
+
+          expect(duration).to eq(123.456)
+        end
+      end
+    end
+
+    context 'with end_time provided' do
+      # set an end time considerably ahead of than span duration
+      # set a day in the future and then measure duration is longer than
+      # amount of time slept, which would represent monotonic
+      let!(:end_time) { Time.now + (duration_wall_time * 1e9) }
+
+      it 'does not use monotonic time' do
+        span_op.start
+        sleep(duration_wall_time)
+        span_op.stop(end_time)
+
+        expect(duration).to be_within(1).of(duration_wall_time * 1e9)
+      end
+    end
+
+    context 'with time_provider set' do
+      before do
+        now = time_now # Expose variable to closure
+        Datadog.configure do |c|
+          c.time_now_provider = -> { now }
+        end
+      end
+
+      after { without_warnings { Datadog.configuration.reset! } }
+
+      let(:time_now) { ::Time.utc(2020, 1, 1) }
+
+      it 'sets the start time to the provider time' do
+        span_op.start
+        span_op.stop
+
+        expect(span_op.start_time).to eq(time_now)
+      end
+    end
+  end
+
+  describe '#set_error' do
+    subject(:set_error) { span_op.set_error(error) }
+
+    context 'given nil' do
+      let(:error) { nil }
+
+      before { set_error }
+
+      it do
+        expect(span_op.status).to eq(Datadog::Tracing::Metadata::Ext::Errors::STATUS)
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_TYPE)).to be nil
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_MSG)).to be nil
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_STACK)).to be nil
+      end
+    end
+
+    context 'given an error' do
+      let(:error) do
+        begin
+          raise message
+        rescue => e
+          e
+        end
+      end
+
+      let(:message) { 'Test error!' }
+
+      before { set_error }
+
+      it do
+        expect(span_op.status).to eq(Datadog::Tracing::Metadata::Ext::Errors::STATUS)
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_TYPE)).to eq(error.class.to_s)
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_MSG)).to eq(message)
+        expect(span_op.get_tag(Datadog::Tracing::Metadata::Ext::Errors::TAG_STACK)).to be_a_kind_of(String)
+      end
+    end
+  end
+end
+
+RSpec.describe Datadog::Tracing::SpanOperation::Events do
+  subject(:events) { described_class.new }
+
+  describe '::new' do
+    it {
+      is_expected.to have_attributes(
+        after_finish: kind_of(described_class::AfterFinish),
+        before_start: kind_of(described_class::BeforeStart),
+        on_error: kind_of(described_class::OnError)
+      )
+    }
+  end
+
+  describe '#after_finish' do
+    subject(:after_finish) { events.after_finish }
+    it { is_expected.to be_a_kind_of(Datadog::Tracing::Event) }
+    it { expect(after_finish.name).to be(:after_finish) }
+  end
+
+  describe '#before_start' do
+    subject(:before_start) { events.before_start }
+    it { is_expected.to be_a_kind_of(Datadog::Tracing::Event) }
+    it { expect(before_start.name).to be(:before_start) }
+  end
+
+  describe '#on_error' do
+    subject(:on_error) { events.on_error }
+    it { is_expected.to respond_to(:publish) }
+  end
+end
