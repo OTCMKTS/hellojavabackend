@@ -121,3 +121,58 @@ RSpec.describe Datadog::Tracing::TraceDigest do
       context ':trace_resource' do
         let(:options) { { trace_resource: trace_resource } }
         let(:trace_resource) { 'generate_report' }
+
+        it { is_expected.to have_attributes(trace_resource: be_a_frozen_copy_of(trace_resource)) }
+      end
+
+      context ':trace_runtime_id' do
+        let(:options) { { trace_runtime_id: trace_runtime_id } }
+        let(:trace_runtime_id) { Datadog::Core::Environment::Identity.id }
+
+        it { is_expected.to have_attributes(trace_runtime_id: be_a_frozen_copy_of(trace_runtime_id)) }
+      end
+
+      context ':trace_sampling_priority' do
+        let(:options) { { trace_sampling_priority: trace_sampling_priority } }
+        let(:trace_sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP }
+
+        it { is_expected.to have_attributes(trace_sampling_priority: trace_sampling_priority) }
+      end
+
+      context ':trace_service' do
+        let(:options) { { trace_service: trace_service } }
+        let(:trace_service) { 'job-worker' }
+
+        it { is_expected.to have_attributes(trace_service: be_a_frozen_copy_of(trace_service)) }
+      end
+
+      context ':trace_distributed_id' do
+        let(:options) { { trace_distributed_id: trace_distributed_id } }
+        let(:trace_distributed_id) { 1 << 127 }
+
+        it { is_expected.to have_attributes(trace_distributed_id: 1 << 127) }
+      end
+
+      context ':trace_flags' do
+        let(:options) { { trace_flags: trace_flags } }
+        let(:trace_flags) { 0xFF }
+
+        it { is_expected.to have_attributes(trace_flags: 0xFF) }
+      end
+
+      context ':trace_state' do
+        let(:options) { { trace_state: trace_state } }
+        let(:trace_state) { 'vendor1=value,v2=v' }
+
+        it { is_expected.to have_attributes(trace_state: be_a_frozen_copy_of('vendor1=value,v2=v')) }
+      end
+
+      context 'trace_state_unknown_fields' do
+        let(:options) { { trace_state_unknown_fields: trace_state_unknown_fields } }
+        let(:trace_state_unknown_fields) { 'unknown1:field1;unknown2:field2;' }
+
+        it { is_expected.to have_attributes(trace_state_unknown_fields: be_a_frozen_copy_of(trace_state_unknown_fields)) }
+      end
+    end
+  end
+end
