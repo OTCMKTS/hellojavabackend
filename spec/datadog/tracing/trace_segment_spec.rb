@@ -202,4 +202,147 @@ RSpec.describe Datadog::Tracing::TraceSegment do
 
       context ':process_id' do
         let(:options) { { tags: { Datadog::Core::Runtime::Ext::TAG_PROCESS_ID => process_id } } }
-        let(:process_id) { Datadog::Core::Environment::Ide
+        let(:process_id) { Datadog::Core::Environment::Identity.pid }
+
+        it { is_expected.to have_attributes(process_id: process_id) }
+      end
+
+      context ':rate_limiter_rate' do
+        let(:options) do
+          { metrics: { Datadog::Tracing::Metadata::Ext::Sampling::TAG_RATE_LIMITER_RATE => rate_limiter_rate } }
+        end
+        let(:rate_limiter_rate) { rand }
+
+        it { is_expected.to have_attributes(rate_limiter_rate: rate_limiter_rate) }
+      end
+
+      context ':resource' do
+        let(:options) { { tags: { Datadog::Tracing::TraceSegment::TAG_RESOURCE => resource } } }
+        let(:resource) { 'generate_report' }
+
+        it { is_expected.to have_attributes(resource: be_a_copy_of(resource)) }
+      end
+
+      context ':rule_sample_rate' do
+        let(:options) do
+          { metrics: { Datadog::Tracing::Metadata::Ext::Sampling::TAG_RULE_SAMPLE_RATE => rule_sample_rate } }
+        end
+        let(:rule_sample_rate) { rand }
+
+        it { is_expected.to have_attributes(rule_sample_rate: rule_sample_rate) }
+      end
+
+      context ':runtime_id' do
+        let(:options) { { tags: { Datadog::Core::Runtime::Ext::TAG_ID => runtime_id } } }
+        let(:runtime_id) { Datadog::Core::Environment::Identity.id }
+
+        it { is_expected.to have_attributes(runtime_id: runtime_id) }
+      end
+
+      context ':sample_rate' do
+        let(:options) { { metrics: { Datadog::Tracing::Metadata::Ext::Sampling::TAG_SAMPLE_RATE => sample_rate } } }
+        let(:sample_rate) { rand }
+
+        it { is_expected.to have_attributes(sample_rate: sample_rate) }
+      end
+
+      context ':sampling_decision_maker' do
+        let(:options) { { tags: { '_dd.p.dm' => sampling_decision_maker } } }
+        let(:sampling_decision_maker) { '-1' }
+
+        it { is_expected.to have_attributes(sampling_decision_maker: sampling_decision_maker) }
+      end
+
+      context ':sampling_priority' do
+        let(:options) do
+          { tags: { Datadog::Tracing::Metadata::Ext::Distributed::TAG_SAMPLING_PRIORITY => sampling_priority } }
+        end
+        let(:sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP }
+
+        it { is_expected.to have_attributes(sampling_priority: sampling_priority) }
+      end
+
+      context ':service' do
+        let(:options) { { tags: { Datadog::Tracing::TraceSegment::TAG_SERVICE => service } } }
+        let(:service) { 'job-worker' }
+
+        it { is_expected.to have_attributes(service: be_a_copy_of(service)) }
+      end
+    end
+  end
+
+  describe 'forwarded #spans methods' do
+    [
+      :any?,
+      :count,
+      :empty?,
+      :length,
+      :size
+    ].each do |forwarded_method|
+      describe "##{forwarded_method}" do
+        it 'forwards to #spans' do
+          expect(spans).to receive(forwarded_method)
+          trace_segment.send(forwarded_method)
+        end
+      end
+    end
+  end
+
+  describe '#keep!' do
+    subject(:keep!) { trace_segment.keep! }
+
+    it do
+      expect { keep! }
+        .to change { trace_segment.sampling_priority }
+        .from(nil)
+        .to(Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP)
+    end
+  end
+
+  describe '#reject!' do
+    subject(:reject!) { trace_segment.reject! }
+
+    it do
+      expect { reject! }
+        .to change { trace_segment.sampling_priority }
+        .from(nil)
+        .to(Datadog::Tracing::Sampling::Ext::Priority::USER_REJECT)
+    end
+  end
+
+  describe '#sampled?' do
+    subject(:sampled?) { trace_segment.sampled? }
+    let(:options) { { sampling_priority: sampling_priority } }
+    let(:sampling_priority) { nil }
+
+    context 'when sampling priority is not set' do
+      it { is_expected.to be false }
+    end
+
+    context 'when sampling priority is set to AUTO_KEEP' do
+      let(:sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::AUTO_KEEP }
+
+      it { is_expected.to be true }
+    end
+
+    context 'when sampling priority is set to USER_KEEP' do
+      let(:sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::USER_KEEP }
+
+      it { is_expected.to be true }
+    end
+
+    context 'when sampling priority is set to AUTO_REJECT' do
+      let(:sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::AUTO_REJECT }
+
+      it { is_expected.to be false }
+    end
+
+    context 'when sampling priority is set to USER_REJECT' do
+      let(:sampling_priority) { Datadog::Tracing::Sampling::Ext::Priority::USER_REJECT }
+
+      it { is_expected.to be false }
+    end
+  end
+
+  describe '#high_order_tid' do
+    context 'when given 64 bits id' do
