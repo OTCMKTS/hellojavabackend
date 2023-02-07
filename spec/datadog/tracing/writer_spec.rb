@@ -191,4 +191,37 @@ RSpec.describe Datadog::Tracing::Writer do
           end
 
           context 'and the trace is not empty' do
-        
+            let(:empty?) { false }
+
+            before do
+              allow(trace).to receive(:empty?).and_return(false)
+              allow(Datadog::Tracing::Runtime::Metrics).to receive(:associate_trace)
+            end
+
+            it 'associates the root span with runtime_metrics' do
+              write
+
+              expect(Datadog::Tracing::Runtime::Metrics)
+                .to have_received(:associate_trace)
+                .with(trace)
+            end
+          end
+        end
+
+        context 'when tracer has been stopped' do
+          before { writer.stop }
+
+          it 'does not try to record traces' do
+            expect_any_instance_of(Datadog::Tracing::Workers::AsyncTransport).to_not receive(:enqueue_trace)
+
+            # Ensure clean output, as failing to start the
+            # worker in this situation is not an error.
+            expect(Datadog.logger).to_not receive(:debug)
+
+            write
+          end
+        end
+      end
+    end
+  end
+end
