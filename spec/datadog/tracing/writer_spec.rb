@@ -54,4 +54,141 @@ RSpec.describe Datadog::Tracing::Writer do
 
           let(:options) { { agent_settings: agent_settings } }
 
-     
+          it 'configures the transport using the agent_settings' do
+            expect(Datadog::Transport::HTTP).to receive(:default).with(agent_settings: agent_settings)
+
+            writer
+          end
+        end
+      end
+
+      describe '#send_spans' do
+        subject(:send_spans) { writer.send_spans(traces, writer.transport) }
+
+        let(:traces) { get_test_traces(1) }
+        let(:transport_stats) { instance_double(Datadog::Transport::Statistics) }
+        let(:responses) { [response] }
+        let(:response) { double('response') }
+
+        before do
+          allow(transport).to receive(:send_traces)
+            .with(traces)
+            .and_return(responses)
+
+          allow(transport).to receive(:stats).and_return(transport_stats)
+
+          allow(Datadog::Core::Diagnostics::EnvironmentLogger).to receive(:log!)
+        end
+
+        shared_examples 'after_send events' do
+          it 'publishes after_send event' do
+            writer.events.after_send.subscribe do |writer, responses|
+              expect(writer).to be(self.writer)
+              expect(responses).to be(self.responses)
+            end
+
+            send_spans
+          end
+        end
+
+        context 'which returns a response that is' do
+          let(:response) { instance_double(Datadog::Transport::HTTP::Traces::Response, trace_count: 1) }
+
+          context 'successful' do
+            before do
+              allow(response).to receive(:ok?).and_return(true)
+              allow(response).to receive(:server_error?).and_return(false)
+              allow(response).to receive(:internal_error?).and_return(false)
+            end
+
+            it_behaves_like 'after_send events'
+          end
+
+          context 'a server error' do
+            before do
+              allow(response).to receive(:ok?).and_return(false)
+              allow(response).to receive(:server_error?).and_return(true)
+              allow(response).to receive(:internal_error?).and_return(false)
+            end
+
+            it_behaves_like 'after_send events'
+          end
+
+          context 'an internal error' do
+            let(:response) { Datadog::Transport::InternalErrorResponse.new(double('error')) }
+            let(:error) { double('error') }
+
+            it_behaves_like 'after_send events'
+          end
+        end
+
+        context 'with multiple responses' do
+          let(:response1) do
+            instance_double(
+              Datadog::Transport::HTTP::Traces::Response,
+              internal_error?: false,
+              server_error?: false,
+              ok?: true,
+              trace_count: 10
+            )
+          end
+          let(:response2) do
+            instance_double(
+              Datadog::Transport::HTTP::Traces::Response,
+              internal_error?: false,
+              server_error?: false,
+              ok?: true,
+              trace_count: 20
+            )
+          end
+
+          let(:responses) { [response1, response2] }
+
+          context 'and at least one being server error' do
+            let(:response2) do
+              instance_double(
+                Datadog::Transport::HTTP::Traces::Response,
+                internal_error?: false,
+                server_error?: true,
+                ok?: false
+              )
+            end
+
+            it do
+              is_expected.to be_falsey
+              expect(writer.stats[:traces_flushed]).to eq(10)
+            end
+          end
+
+          it_behaves_like 'after_send events'
+        end
+      end
+
+      describe '#write' do
+        subject(:write) { writer.write(trace) }
+
+        let(:trace) { instance_double(Datadog::Tracing::TraceSegment, service: service, empty?: empty?) }
+        let(:service) { 'my-service' }
+        let(:empty?) { true }
+
+        before do
+          allow(Datadog.configuration.runtime_metrics)
+            .to receive(:enabled).and_return(false)
+        end
+
+        context 'when runtime metrics are enabled' do
+          before do
+            allow_any_instance_of(Datadog::Tracing::Workers::AsyncTransport)
+              .to receive(:start)
+
+            expect_any_instance_of(Datadog::Tracing::Workers::AsyncTransport)
+              .to receive(:enqueue_trace)
+              .with(trace)
+
+            allow(Datadog.configuration.runtime_metrics)
+              .to receive(:enabled)
+              .and_return(true)
+          end
+
+          context 'and the trace is not empty' do
+        
