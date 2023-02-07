@@ -127,4 +127,41 @@ RSpec.describe Datadog::Transport::IO::Traces::Encoder do
             compare_arrays(traces, encoded_traces) do |trace, encoded_trace|
               compare_arrays(trace.spans, encoded_trace) do |span, encoded_span|
                 described_class::ENCODED_IDS.each do |id|
-                  encoded_id = enc
+                  encoded_id = encoded_span[id.to_s].to_i(16)
+                  original_id = span.send(id)
+                  expect(encoded_id).to eq(original_id)
+                end
+              end
+            end
+          end
+        end
+      end
+
+      context 'when ID is missing' do
+        subject(:encoded_traces) { JSON.parse(encode_traces)['traces'] }
+
+        let(:missing_id) { :span_id }
+
+        before do
+          # Delete ID from each Span
+          traces.each do |trace|
+            trace.spans.each do |span|
+              allow(span).to receive(:to_hash)
+                .and_wrap_original do |m, *_args|
+                  m.call.tap { |h| h.delete(missing_id) }
+                end
+            end
+          end
+        end
+
+        it 'does not include the missing ID' do
+          compare_arrays(traces, encoded_traces) do |trace, encoded_trace|
+            compare_arrays(trace.spans, encoded_trace) do |_span, encoded_span|
+              expect(encoded_span).to_not include(missing_id.to_s)
+            end
+          end
+        end
+      end
+    end
+  end
+end
