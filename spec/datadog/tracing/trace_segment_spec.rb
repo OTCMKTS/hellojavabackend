@@ -346,3 +346,19 @@ RSpec.describe Datadog::Tracing::TraceSegment do
 
   describe '#high_order_tid' do
     context 'when given 64 bits id' do
+      let(:trace_id) { 0xffffffffffffffff }
+
+      it do
+        expect(trace_segment.high_order_tid).to eq(nil)
+      end
+    end
+
+    context 'when given 128 bits id' do
+      let(:trace_id) { 0xaaaaaaaaaaaaaaaaffffffffffffffff }
+
+      it do
+        expect(trace_segment.high_order_tid).to eq('aaaaaaaaaaaaaaaa')
+      end
+    end
+  end
+end
