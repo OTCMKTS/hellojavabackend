@@ -144,4 +144,141 @@ RSpec.describe Datadog::Transport::TraceFormatter do
           expect(root_span).to have_metadata(
             Datadog::Tracing::Metadata::Ext::Sampling::TAG_AGENT_RATE => agent_sample_rate,
             Datadog::Tracing::Metadata::Ext::NET::TAG_HOSTNAME => hostname,
-            Datadog::Core::Runtime::Ext::TAG_
+            Datadog::Core::Runtime::Ext::TAG_LANG => lang,
+            Datadog::Tracing::Metadata::Ext::Distributed::TAG_ORIGIN => origin,
+            'process_id' => process_id,
+            Datadog::Tracing::Metadata::Ext::Sampling::TAG_RATE_LIMITER_RATE => rate_limiter_rate,
+            Datadog::Tracing::Metadata::Ext::Sampling::TAG_RULE_SAMPLE_RATE => rule_sample_rate,
+            Datadog::Core::Runtime::Ext::TAG_ID => runtime_id,
+            Datadog::Tracing::Metadata::Ext::Sampling::TAG_SAMPLE_RATE => sample_rate,
+            Datadog::Tracing::Metadata::Ext::Distributed::TAG_SAMPLING_PRIORITY => sampling_priority,
+          )
+        end
+      end
+
+      shared_examples 'root span with generic tags' do
+        context 'metrics' do
+          it 'sets root span tags from trace tags' do
+            format!
+            expect(root_span.metrics).to include({ 'baz' => 42 })
+          end
+        end
+
+        context 'meta' do
+          it 'sets root span tags from trace tags' do
+            format!
+            expect(root_span.meta).to include(
+              {
+                'foo' => 'bar',
+                '_dd.p.dm' => '-1',
+                '_dd.p.tid' => 'aaaaaaaaaaaaaaaa'
+              }
+            )
+          end
+        end
+      end
+
+      shared_examples 'root span without generic tags' do
+        context 'metrics' do
+          it { expect(root_span.metrics).to_not include('baz') }
+        end
+
+        context 'meta' do
+          it { expect(root_span.meta).to_not include('foo') }
+          it { expect(root_span.meta).to_not include('_dd.p.dm') }
+          it { expect(root_span.meta).to_not include('_dd.p.tid') }
+        end
+      end
+
+      context 'with no root span' do
+        include_context 'no root span'
+
+        context 'when trace has no metadata set' do
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with no tags'
+        end
+
+        context 'when trace has metadata set' do
+          include_context 'trace metadata'
+
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with tags'
+        end
+
+        context 'when trace has metadata set with generic tags' do
+          include_context 'trace metadata with tags'
+
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with tags'
+          it_behaves_like 'root span without generic tags'
+        end
+      end
+
+      context 'with missing root span' do
+        include_context 'missing root span'
+
+        context 'when trace has no metadata set' do
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with no tags'
+        end
+
+        context 'when trace has metadata set' do
+          include_context 'trace metadata'
+
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with tags'
+        end
+
+        context 'when trace has metadata set with generic tags' do
+          include_context 'trace metadata with tags'
+
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with tags'
+          it_behaves_like 'root span without generic tags'
+        end
+      end
+
+      context 'with a root span' do
+        include_context 'available root span'
+
+        context 'when trace has no metadata set' do
+          it { is_expected.to be(trace) }
+
+          it 'does not override the root span resource' do
+            expect { format! }.to_not(change { root_span.resource })
+          end
+
+          it_behaves_like 'root span with no tags'
+        end
+
+ 
