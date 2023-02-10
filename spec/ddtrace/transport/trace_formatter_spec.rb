@@ -281,4 +281,33 @@ RSpec.describe Datadog::Transport::TraceFormatter do
           it_behaves_like 'root span with no tags'
         end
 
- 
+        context 'when trace has metadata set' do
+          include_context 'trace metadata'
+
+          it { is_expected.to be(trace) }
+
+          it 'sets the root span resource from trace resource' do
+            format!
+            expect(root_span.resource).to eq(resource)
+          end
+
+          it_behaves_like 'root span with tags'
+        end
+
+        context 'when trace has metadata set with generic tags' do
+          include_context 'trace metadata with tags'
+
+          it { is_expected.to be(trace) }
+
+          it 'sets the root span resource from trace resource' do
+            format!
+            expect(root_span.resource).to eq(resource)
+          end
+
+          it_behaves_like 'root span with tags'
+          it_behaves_like 'root span with generic tags'
+        end
+      end
+    end
+  end
+end
