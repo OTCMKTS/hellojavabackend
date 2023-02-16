@@ -241,4 +241,107 @@ RSpec.describe Datadog::Transport::Traces::Transport do
 
     context 'which returns an unsupported response' do
       before do
-        allow(response).to receive(:unsupported?).and_ret
+        allow(response).to receive(:unsupported?).and_return(true)
+        allow(response).to receive(:client_error?).and_return(true)
+      end
+
+      it 'attempts each API once as it falls back after each failure' do
+        is_expected.to eq(responses)
+
+        expect(client_v2).to have_received(:send_traces_payload).with(request).once
+        expect(client_v1).to have_received(:send_traces_payload).with(request).once
+
+        expect(health_metrics).to have_received(:transport_chunked).with(1)
+      end
+    end
+  end
+
+  describe '#downgrade?' do
+    include_context 'APIs with fallbacks'
+
+    subject(:downgrade?) { transport.send(:downgrade?, response) }
+
+    let(:response) { instance_double(Datadog::Transport::Response) }
+
+    context 'when there is no fallback' do
+      let(:current_api_id) { :v1 }
+
+      it { is_expected.to be false }
+    end
+
+    context 'when a fallback is available' do
+      let(:current_api_id) { :v2 }
+
+      context 'and the response isn\'t \'not found\' or \'unsupported\'' do
+        before do
+          allow(response).to receive(:not_found?).and_return(false)
+          allow(response).to receive(:unsupported?).and_return(false)
+        end
+
+        it { is_expected.to be false }
+      end
+
+      context 'and the response is \'not found\'' do
+        before do
+          allow(response).to receive(:not_found?).and_return(true)
+          allow(response).to receive(:unsupported?).and_return(false)
+        end
+
+        it { is_expected.to be true }
+      end
+
+      context 'and the response is \'unsupported\'' do
+        before do
+          allow(response).to receive(:not_found?).and_return(false)
+          allow(response).to receive(:unsupported?).and_return(true)
+        end
+
+        it { is_expected.to be true }
+      end
+    end
+  end
+
+  describe '#current_api' do
+    include_context 'APIs with fallbacks'
+
+    subject(:current_api) { transport.current_api }
+
+    it { is_expected.to be(api_v2) }
+  end
+
+  describe '#change_api!' do
+    include_context 'APIs with fallbacks'
+
+    subject(:change_api!) { transport.send(:change_api!, api_id) }
+
+    context 'when the API ID does not match an API' do
+      let(:api_id) { :v99 }
+
+      it { expect { change_api! }.to raise_error(described_class::UnknownApiVersionError) }
+    end
+
+    context 'when the API ID matches an API' do
+      let(:api_id) { :v1 }
+
+      it { expect { change_api! }.to change { transport.current_api }.from(api_v2).to(api_v1) }
+    end
+  end
+
+  describe '#downgrade!' do
+    include_context 'APIs with fallbacks'
+
+    subject(:downgrade!) { transport.send(:downgrade!) }
+
+    context 'when the API has no fallback' do
+      let(:current_api_id) { :v1 }
+
+      it { expect { downgrade! }.to raise_error(described_class::NoDowngradeAvailableError) }
+    end
+
+    context 'when the API has fallback' do
+      let(:current_api_id) { :v2 }
+
+      it { expect { downgrade! }.to change { transport.current_api }.from(api_v2).to(api_v1) }
+    end
+  end
+end
