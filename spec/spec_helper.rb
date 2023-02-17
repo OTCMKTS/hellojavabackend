@@ -162,4 +162,131 @@ RSpec.configure do |config|
 
       unless background_threads.empty?
         # TODO: Temporarily disabled for `spec/ddtrace/workers`
-        # was meaningful changes are required to address c
+        # was meaningful changes are required to address clean
+        # teardown in those tests.
+        # They currently flood the output, making our test
+        # suite output unreadable.
+        if example.file_path.start_with?('./spec/datadog/core/workers/', './spec/ddtrace/workers/')
+          puts # Add newline so we get better output when the progress formatter is being used
+          RSpec.warning("FIXME: #{example.file_path}:#{example.metadata[:line_number]} is leaking threads")
+          next
+        end
+
+        info = background_threads.each_with_index.flat_map do |t, idx|
+          backtrace = t.backtrace
+          if backtrace.nil? && t.alive? # Maybe the thread hasn't run yet? Let's give it a second chance
+            Thread.pass
+            backtrace = t.backtrace
+          end
+          if backtrace.nil? || backtrace.empty?
+            backtrace =
+              if t.alive?
+                ['(Not available. Possibly a native thread.)']
+              else
+                ['(Thread finished before we could collect a backtrace)']
+              end
+          end
+
+          caller = t.instance_variable_get(:@caller) || ['(Not available. Possibly a native thread.)']
+          [
+            "#{idx + 1}: #{t} (#{t.class.name})",
+            'Thread Creation Site:',
+            caller.map { |l| "\t#{l}" }.join("\n"),
+            'Thread Backtrace:',
+            backtrace.map { |l| "\t#{l}" }.join("\n"),
+            "\n"
+          ]
+        end.join("\n")
+
+        # Warn about leakly thread
+        warn RSpec::Core::Formatters::ConsoleCodes.wrap(
+          "\nSpec leaked #{background_threads.size} threads in \"#{example.full_description}\".\n" \
+          "Ensure all threads are terminated when test finishes.\n" \
+          "For help fixing this issue, see \"Ensuring tests don't leak resources\" in docs/DevelopmentGuide.md.\n" \
+          "\n" \
+          "#{info}",
+          :yellow
+        )
+
+        $background_thread_leak_reports += 1
+      end
+    end
+  end
+  # rubocop:enable Style/GlobalVars
+
+  # Closes the global testing tracer.
+  #
+  # Execute this after the test has finished
+  # teardown and mock verifications.
+  #
+  # Changing this to `config.after(:each)` would
+  # put this code inside the test scope, interfering
+  # with the test execution.
+  config.around do |example|
+    example.run.tap do
+      tracer_shutdown!
+    end
+  end
+end
+
+# Stores the caller thread backtrace,
+# To allow for leaky threads to be traced
+# back to their creation point.
+module DatadogThreadDebugger
+  # DEV: we have to use an explicit `block`, argument
+  # instead of the implicit `yield` call, as calling
+  # `yield` here crashes the Ruby VM in Ruby < 2.2.
+  def initialize(*args, &block)
+    @caller = caller
+    wrapped = lambda do |*thread_args|
+      block.call(*thread_args) # rubocop:disable Performance/RedundantBlockCall
+    end
+    wrapped.send(:ruby2_keywords) if wrapped.respond_to?(:ruby2_keywords, true)
+
+    super(*args, &wrapped)
+  end
+
+  ruby2_keywords :initialize if respond_to?(:ruby2_keywords, true)
+end
+
+Thread.prepend(DatadogThreadDebugger)
+
+# Enforce test time limit, to allow us to debug why some test runs get stuck in CI
+if ENV.key?('CI')
+  require 'spec/support/thread_helpers'
+
+  ThreadHelpers.with_leaky_thread_creation('Deadline thread') do
+    Thread.new do
+      sleep_time = 30 * 60 # 30 minutes
+      sleep(sleep_time)
+
+      warn "Test too longer than #{sleep_time}s to finish, aborting test run."
+      warn 'Stack trace of all running threads:'
+
+      Thread.list.select { |t| t.alive? && t != Thread.current }.each_with_index.map do |t, idx|
+        backtrace = t.backtrace
+        backtrace = ['(Not available)'] if backtrace.nil? || backtrace.empty?
+
+        msg = "#{idx}: #{t} (#{t.class.name})",
+              'Thread Backtrace:',
+              backtrace.map { |l| "\t#{l}" }.join("\n"),
+              "\n"
+
+        warn(msg) rescue puts(msg)
+      end
+
+      Kernel.exit(1)
+    end
+  end
+end
+
+# Helper matchers
+RSpec::Matchers.define_negated_matcher :not_be, :be
+
+# The Ruby Timeout class uses a long-lived class-level thread that is never terminated.
+# Creating it early here ensures tests that tests that check for leaking threads are not
+# triggered by the creation of this thread.
+#
+# This has to be one once for the lifetime of this process, and was introduced in Ruby 3.1.
+# Before 3.1, a thread was created and destroyed on every Timeout#timeout call.
+Timeout.ensure_timeout_thread_created if Timeout.respond_to?(:ensure_timeout_thread_
