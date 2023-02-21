@@ -116,4 +116,21 @@ namespace :upstream do
 
 
       with_repository('open-telemetry', 'opentelemetry-ruby', OTEL_GIT_COMMIT, setup) do
-       
+        Dir.chdir('sdk') do
+          ClimateControl.modify('TESTOPTS' => skipped_tests_opt(skipped_tests)) do\
+            sh 'bundle exec rake test'
+          end
+        end
+      end
+    end
+  end
+
+  task opentelemetry: ['opentelemetry:api', 'opentelemetry:sdk']
+
+  desc "Removes cloned files of instrumented gems"
+  task :clean do
+    FileUtils.rm_r(BASE_CLONE_DIR)
+  end
+end
+
+task upstream: ['upstream:opentelemetry']
