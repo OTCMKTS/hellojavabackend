@@ -148,4 +148,85 @@ module ContainerHelpers
 
     let(:platform) { 'ecs' }
     let(:container_id) { '38fac3e99302b3622be089dd41e7ccf38aff368a86cc339972075136ee2710ce' }
-    let(:task_arn) { '5a0d
+    let(:task_arn) { '5a0d5ceddf6c44c1928d367a815d890f' }
+    let(:lines) { 9 }
+
+    before do
+      cgroup_file.puts "9:perf_event:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "8:memory:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "7:hugetlb:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "6:freezer:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "5:devices:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "4:cpuset:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "3:cpuacct:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "2:cpu:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.puts "1:blkio:/#{platform}/haissam-ecs-classic/#{task_arn}/#{container_id}"
+      cgroup_file.rewind
+    end
+  end
+
+  shared_context 'Fargate 1.3- environment' do
+    include_context 'cgroup file'
+
+    let(:platform) { 'ecs' }
+    let(:container_id) { '432624d2150b349fe35ba397284dea788c2bf66b885d14dfc1569b01890ca7da' }
+    let(:task_arn) { '55091c13-b8cf-4801-b527-f4601742204d' }
+    let(:lines) { 11 }
+
+    before do
+      cgroup_file.puts "11:hugetlb:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "10:pids:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "9:cpuset:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "8:net_cls,net_prio:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "7:cpu,cpuacct:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "6:perf_event:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "5:freezer:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "4:devices:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "3:blkio:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "2:memory:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.puts "1:name=systemd:/#{platform}/#{task_arn}/#{container_id}"
+      cgroup_file.rewind
+    end
+  end
+
+  shared_context 'Fargate 1.4+ environment' do
+    include_context 'cgroup file'
+
+    let(:platform) { 'ecs' }
+    let(:container_id_with_random) { "#{container_id_without_random}-1234567890" }
+    let(:container_id_without_random) { '34dc0b5e626f2c5c4c5170e34b10e765' }
+    let(:lines) { 11 }
+
+    before do
+      cgroup_file.puts "11:hugetlb:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "10:pids:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "9:cpuset:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "8:net_cls,net_prio:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "7:cpu,cpuacct:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "6:perf_event:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "5:freezer:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "4:devices:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "3:blkio:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "2:memory:/#{platform}/#{container_id_with_random}"
+      cgroup_file.puts "1:name=systemd:/#{platform}/#{container_id_with_random}"
+      cgroup_file.rewind
+    end
+  end
+
+  shared_context 'Fargate 1.4+ (2-part) environment' do
+    include_context 'cgroup file'
+
+    let(:platform) { 'ecs' }
+    let(:container_id_with_random) { "#{container_id_without_random}-1234567890" }
+    let(:container_id_without_random) { '34dc0b5e626f2c5c4c5170e34b10e765' }
+    let(:lines) { 11 }
+
+    before do
+      cgroup_file.puts "11:hugetlb:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "10:pids:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "9:cpuset:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "8:net_cls,net_prio:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "7:cpu,cpuacct:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "6:perf_event:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "5:freezer:/#{platform}/#{container_id_without_random}/#{container_id_with_random}"
+      cgroup_file.puts "4:devices:/#{platform}/#{container_id_without_random}/#{container_id_
