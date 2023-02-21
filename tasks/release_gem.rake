@@ -33,4 +33,5 @@ task :'release:gem' do
   sh 'cp pkg/*.gem ./rubygems/gems/'
 
   # deploy a static gem registry
-  sh "aws s3 cp --recurs
+  sh "aws s3 cp --recursive ./rubygems/ s3://#{S3_BUCKET}/#{S3_DIR}/"
+end
